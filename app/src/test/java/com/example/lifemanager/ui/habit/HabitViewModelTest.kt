@@ -1,0 +1,110 @@
+package com.example.lifemanager.ui.habit
+
+import androidx.lifecycle.viewModelScope
+import com.example.lifemanager.domain.model.Habit
+import com.example.lifemanager.domain.model.HabitRecord
+import com.example.lifemanager.domain.repository.HabitRepository
+import java.time.Instant
+import java.time.LocalDate
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class HabitViewModelTest {
+    @Test
+    fun `save rejects blank habit name`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        var viewModel: HabitViewModel? = null
+        try {
+            val model = HabitViewModel(FakeHabitRepository(), dispatcher)
+            viewModel = model
+            advanceUntilIdle()
+
+            model.openEditor()
+            model.onNameChanged("  ")
+            model.saveHabit()
+            advanceUntilIdle()
+
+            assertEquals("习惯名称不能为空", model.uiState.value.editor.validationMessage)
+        } finally {
+            viewModel?.viewModelScope?.cancel()
+            advanceUntilIdle()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `toggle updates completed state from repository flow`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        var viewModel: HabitViewModel? = null
+        try {
+            val model = HabitViewModel(
+                FakeHabitRepository(habits = listOf(habit(id = 1))),
+                dispatcher,
+            )
+            viewModel = model
+            advanceUntilIdle()
+
+            model.toggleToday(1)
+            advanceUntilIdle()
+
+            assertTrue(model.uiState.value.cards.single().completedToday)
+        } finally {
+            viewModel?.viewModelScope?.cancel()
+            advanceUntilIdle()
+            Dispatchers.resetMain()
+        }
+    }
+
+    private class FakeHabitRepository(habits: List<Habit> = emptyList()) : HabitRepository {
+        private val habitState = MutableStateFlow(habits)
+        private val recordState = MutableStateFlow<List<HabitRecord>>(emptyList())
+
+        override fun observeHabits(): Flow<List<Habit>> = habitState
+
+        override fun observeRecords(start: LocalDate, end: LocalDate): Flow<List<HabitRecord>> =
+            recordState.map { records -> records.filter { it.date in start..end } }
+
+        override suspend fun saveHabit(habit: Habit): Long {
+            val saved = habit.copy(id = if (habit.id == 0L) habitState.value.size + 1L else habit.id)
+            habitState.value = habitState.value.filterNot { it.id == saved.id } + saved
+            return saved.id
+        }
+
+        override suspend fun deleteHabit(id: Long) {
+            habitState.value = habitState.value.filterNot { it.id == id }
+            recordState.value = recordState.value.filterNot { it.habitId == id }
+        }
+
+        override suspend fun toggleRecord(habitId: Long, date: LocalDate): Boolean {
+            val current = recordState.value
+            val existing = current.firstOrNull { it.habitId == habitId && it.date == date }
+            recordState.value = if (existing == null) {
+                current + HabitRecord(habitId = habitId, date = date, createdAt = Instant.EPOCH)
+            } else {
+                current - existing
+            }
+            return existing == null
+        }
+    }
+
+    private fun habit(id: Long) = Habit(
+        id = id,
+        name = "阅读",
+        startDate = LocalDate.now().minusDays(7),
+    )
+}
