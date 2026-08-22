@@ -8,6 +8,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.example.lifemanager.data.local.LifeManagerDatabase
+import com.example.lifemanager.data.repository.toDomain
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 
@@ -23,11 +24,13 @@ class ReminderReconciliationWorker(
         ).addMigrations(*LifeManagerDatabase.MIGRATIONS).build()
         return try {
             val scheduler = ReminderScheduler(applicationContext)
+            val scheduleScheduler = ScheduleReminderScheduler(applicationContext)
             database.todoDao().getAll()
                 .filter { !it.isCompleted && it.dueAt != null }
                 .forEach { todo ->
                     scheduler.schedule(todo.id, todo.title, Instant.ofEpochMilli(todo.dueAt ?: 0L))
                 }
+            database.scheduleDao().getAll().forEach { scheduleScheduler.schedule(it.toDomain()) }
             Result.success()
         } catch (_: Exception) {
             Result.retry()

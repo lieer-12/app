@@ -28,6 +28,14 @@ object NotificationHelper {
     }
 
     fun showTodoReminder(context: Context, todoId: Long, title: String) {
+        showReminder(context, ReminderKey.forTodo(todoId), "待办提醒", title, TodoReminderReceiver.EXTRA_TODO_ID, todoId)
+    }
+
+    fun showScheduleReminder(context: Context, scheduleId: Long, title: String) {
+        showReminder(context, ReminderKey.forSchedule(scheduleId), "日程提醒", title, ScheduleReminderReceiver.EXTRA_SCHEDULE_ID, scheduleId)
+    }
+
+    private fun showReminder(context: Context, notificationId: Int, notificationTitle: String, title: String, extraKey: String, id: Long) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
@@ -35,18 +43,18 @@ object NotificationHelper {
         createChannel(context)
         val openIntent = PendingIntent.getActivity(
             context,
-            ReminderKey.forTodo(todoId),
-            Intent(context, MainActivity::class.java).putExtra(MainActivity.EXTRA_TODO_ID, todoId),
+            notificationId,
+            Intent(context, MainActivity::class.java).putExtra(extraKey, id),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = android.app.Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("待办提醒")
+            .setContentTitle(notificationTitle)
             .setContentText(title)
             .setContentIntent(openIntent)
             .setAutoCancel(true)
             .build()
         context.getSystemService(NotificationManager::class.java)
-            .notify(ReminderKey.forTodo(todoId), notification)
+            .notify(notificationId, notification)
     }
 }

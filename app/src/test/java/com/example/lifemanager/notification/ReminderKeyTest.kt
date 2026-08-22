@@ -14,4 +14,9 @@ class ReminderKeyTest {
     fun `different todo ids produce different request codes`() {
         assertNotEquals(ReminderKey.forTodo(42L), ReminderKey.forTodo(43L))
     }
+
+    @Test
+    fun `schedule reminder key cannot collide with todo reminder key`() {
+        assertNotEquals(ReminderKey.forTodo(42L), ReminderKey.forSchedule(42L))
+    }
 }

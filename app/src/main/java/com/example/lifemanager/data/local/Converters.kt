@@ -2,6 +2,7 @@ package com.example.lifemanager.data.local
 
 import androidx.room.TypeConverter
 import com.example.lifemanager.domain.model.TodoPriority
+import com.example.lifemanager.domain.model.ScheduleRepeatRule
 import java.time.Instant
 
 class Converters {
@@ -16,4 +17,10 @@ class Converters {
 
     @TypeConverter
     fun toPriority(value: String): TodoPriority = TodoPriority.valueOf(value)
+
+    @TypeConverter
+    fun fromScheduleRepeatRule(value: ScheduleRepeatRule): String = value.name
+
+    @TypeConverter
+    fun toScheduleRepeatRule(value: String): ScheduleRepeatRule = ScheduleRepeatRule.valueOf(value)
 }

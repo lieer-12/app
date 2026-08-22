@@ -1,9 +1,13 @@
 package com.example.lifemanager.di
 
 import com.example.lifemanager.data.repository.TodoRepositoryImpl
+import com.example.lifemanager.data.repository.ScheduleRepositoryImpl
+import com.example.lifemanager.domain.repository.ScheduleRepository
 import com.example.lifemanager.domain.repository.TodoRepository
 import com.example.lifemanager.notification.ReminderScheduler
 import com.example.lifemanager.notification.ReminderSchedulerContract
+import com.example.lifemanager.notification.ScheduleReminderScheduler
+import com.example.lifemanager.notification.ScheduleReminderSchedulerContract
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -26,6 +30,10 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindTodoRepository(impl: TodoRepositoryImpl): TodoRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindScheduleRepository(impl: ScheduleRepositoryImpl): ScheduleRepository
 }
 
 @Module
@@ -35,6 +43,11 @@ object ProviderModule {
     @Singleton
     fun provideReminderScheduler(@ApplicationContext context: Context): ReminderSchedulerContract =
         ReminderScheduler(context)
+
+    @Provides
+    @Singleton
+    fun provideScheduleReminderScheduler(@ApplicationContext context: Context): ScheduleReminderSchedulerContract =
+        ScheduleReminderScheduler(context)
 
     @Provides
     @IoDispatcher

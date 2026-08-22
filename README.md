@@ -1,6 +1,6 @@
 # 生活管理 Android App
 
-当前实现范围：Phase 1（待办事项核心闭环）。
+当前实现范围：Phase 1（待办事项核心闭环）与 Phase 2（日程安排）。
 
 已包含的目标能力：
 
@@ -11,29 +11,29 @@
 - 今日完成数、待完成数和完成率
 - 本地截止提醒、通知权限处理和确定性提醒 ID
 - 系统浅色/深色主题
+- 日程月/周/日视图、日程 CRUD、重复规则、冲突确认与本地提醒
 
-暂未实现：日程、订阅、打卡，以及这些模块的页面、假数据和空白占位 Tab。
+暂未实现：订阅、打卡，以及这些模块的页面、假数据和空白占位 Tab。
 
 ## 构建环境
 
 - Android SDK Platform 35
 - Android Gradle Plugin 9.2.0
 - Gradle 9.4.1
-- JDK 17（当前机器只有 JDK 25，未确认兼容）
+- JDK 25（Gradle 运行时）；Android 字节码目标仍为 Java/Kotlin 17，以保持设备兼容性
 
-在具备 Android SDK、JDK 17 和 Gradle 后运行：
+在具备 Android SDK、JDK 25 和 Gradle 后运行：
 
 ```powershell
 gradle test
 gradle assembleDebug
 ```
 
-当前工作区缺少 `gradle`、Android SDK 和 `adb`，因此本次不能声称编译或测试已经通过。完成工具链安装后，应先运行：
+本项目已在 Android SDK Platform 35、Gradle 9.4.1 与 JDK 25 环境下完成 debug APK 构建。项目使用项目内 Gradle 安装时，可运行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/check-phase1-structure.ps1
-gradle test
-gradle assembleDebug
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/check-phase2-structure.ps1
+.\.tools\gradle-9.4.1\bin\gradle.bat :app:assembleDebug
 ```
 
 ## 权限与提醒行为
@@ -44,10 +44,12 @@ gradle assembleDebug
 
 ## 阶段状态
 
-- Phase 1：代码与测试骨架已写入；待 Android 工具链安装后进行完整构建和设备验收。
-- Phase 2-5：未开始。
+- Phase 1：待办核心闭环已实现；待设备验收通知行为。
+- Phase 2：日程模块已实现、结构检查和 debug APK 构建已通过；等待仪器测试与设备提醒验收。
+- Phase 3-5：未开始。
 
 ## 当前已知限制
 
 - 尚未加入子任务、批量操作和手动拖拽排序，这些属于待办模块的后续完善项。
-- Room schema、Kotlin/Compose 编译、单元测试和设备提醒行为尚未在本机验证，因为当前环境没有 Gradle、Android SDK、ADB 或 JDK 17。
+- 日程不含拖拽改期、双指缩放和“仅取消某次重复日程”的编辑入口。
+- 仪器测试和设备提醒行为仍需在真机或模拟器验证。

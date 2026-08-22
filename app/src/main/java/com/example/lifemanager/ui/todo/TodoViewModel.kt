@@ -84,7 +84,7 @@ class TodoViewModel @Inject constructor(
 
     val uiState: StateFlow<TodoUiState> = combine(contentState, errorMessage) { state, error ->
         state.copy(errorMessage = error)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TodoUiState())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, TodoUiState())
 
     fun onFilterChanged(newFilter: TodoFilter) {
         filter.value = newFilter

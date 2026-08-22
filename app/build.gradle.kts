@@ -1,3 +1,6 @@
+import com.android.build.api.dsl.ApplicationExtension
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -6,7 +9,7 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
-android {
+extensions.configure<ApplicationExtension> {
     namespace = "com.example.lifemanager"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
@@ -35,10 +38,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     buildFeatures {
         compose = true
         buildConfig = true
@@ -50,6 +49,12 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 
@@ -98,6 +103,5 @@ kapt {
     correctErrorTypes = true
     arguments {
         arg("room.schemaLocation", "$projectDir/schemas")
-        arg("room.generateKotlin", "true")
     }
 }

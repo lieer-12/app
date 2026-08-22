@@ -5,13 +5,17 @@ import com.example.lifemanager.domain.model.Todo
 import com.example.lifemanager.domain.model.TodoFilter
 import com.example.lifemanager.domain.repository.TodoRepository
 import com.example.lifemanager.notification.ReminderSchedulerContract
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -23,17 +27,21 @@ class TodoViewModelTest {
     fun `save rejects blank title and exposes validation message`() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
+        var viewModel: TodoViewModel? = null
         try {
-            val viewModel = TodoViewModel(
+            val model = TodoViewModel(
                 repository = FakeTodoRepository(),
                 reminderScheduler = NoOpReminderScheduler,
                 dispatcher = dispatcher,
             )
-            viewModel.onTitleChanged("   ")
-            viewModel.saveTodo()
+            viewModel = model
             advanceUntilIdle()
-            assertEquals("标题不能为空", viewModel.uiState.value.editor.validationMessage)
+            model.onTitleChanged("   ")
+            model.saveTodo()
+            advanceUntilIdle()
+            assertEquals("标题不能为空", model.uiState.value.editor.validationMessage)
         } finally {
+            viewModel?.viewModelScope?.cancel()
             Dispatchers.resetMain()
         }
     }
@@ -43,17 +51,20 @@ class TodoViewModelTest {
         val repository = FakeTodoRepository()
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
+        var viewModel: TodoViewModel? = null
         try {
-            val viewModel = TodoViewModel(
+            val model = TodoViewModel(
                 repository = repository,
                 reminderScheduler = NoOpReminderScheduler,
                 dispatcher = dispatcher,
             )
-            viewModel.onTitleChanged("整理资料")
-            viewModel.saveTodo()
+            viewModel = model
+            model.onTitleChanged("整理资料")
+            model.saveTodo()
             advanceUntilIdle()
             assertEquals(listOf("整理资料"), repository.todos.value.map(Todo::title))
         } finally {
+            viewModel?.viewModelScope?.cancel()
             Dispatchers.resetMain()
         }
     }
@@ -65,12 +76,15 @@ class TodoViewModelTest {
         }
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
+        var viewModel: TodoViewModel? = null
         try {
-            val viewModel = TodoViewModel(repository, NoOpReminderScheduler, dispatcher)
-            viewModel.toggleTodo(repository.todos.value.single())
+            val model = TodoViewModel(repository, NoOpReminderScheduler, dispatcher)
+            viewModel = model
+            model.toggleTodo(repository.todos.value.single())
             advanceUntilIdle()
             assertTrue(repository.todos.value.single().isCompleted)
         } finally {
+            viewModel?.viewModelScope?.cancel()
             Dispatchers.resetMain()
         }
     }
@@ -82,12 +96,15 @@ class TodoViewModelTest {
         }
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
+        var viewModel: TodoViewModel? = null
         try {
-            val viewModel = TodoViewModel(repository, NoOpReminderScheduler, dispatcher)
-            viewModel.deleteTodo(8)
+            val model = TodoViewModel(repository, NoOpReminderScheduler, dispatcher)
+            viewModel = model
+            model.deleteTodo(8)
             advanceUntilIdle()
             assertFalse(repository.todos.value.any { it.id == 8L })
         } finally {
+            viewModel?.viewModelScope?.cancel()
             Dispatchers.resetMain()
         }
     }

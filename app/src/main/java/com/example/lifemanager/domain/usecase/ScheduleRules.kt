@@ -44,7 +44,15 @@ object ScheduleRules {
             }
             cursor = cursor.plusDays(1)
         }
-        return result.sortedWith(compareBy({ it.startAt ?: it.allDayStartDate }, { it.title }))
+        return result.sortedWith(
+            compareBy<ScheduleOccurrence>(
+                { occurrence ->
+                    occurrence.startAt?.toEpochMilli()
+                        ?: occurrence.allDayStartDate!!.toEpochDay() * 86_400_000L
+                },
+                { occurrence -> occurrence.title },
+            ),
+        )
     }
 
     fun conflictsFor(
