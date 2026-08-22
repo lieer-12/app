@@ -43,8 +43,8 @@ fun SettingsScreen(onBack: () -> Unit) {
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("Phase 1", style = MaterialTheme.typography.titleLarge)
-            Text("当前仅启用待办事项。日程、订阅和打卡会在后续 Phase 验收后加入。")
+            Text("已完成模块", style = MaterialTheme.typography.titleLarge)
+            Text("当前已启用待办、日程和打卡。订阅、打卡提醒、暂停和归档将在后续 Phase 评审后再加入。")
             Text(if (notificationGranted) "通知权限：已允许" else "通知权限：未允许")
             if (Build.VERSION.SDK_INT >= 33 && !notificationGranted) {
                 Button(onClick = { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }) {
