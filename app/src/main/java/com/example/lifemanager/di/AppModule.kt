@@ -2,7 +2,9 @@ package com.example.lifemanager.di
 
 import com.example.lifemanager.data.repository.TodoRepositoryImpl
 import com.example.lifemanager.data.repository.ScheduleRepositoryImpl
+import com.example.lifemanager.data.repository.HabitRepositoryImpl
 import com.example.lifemanager.domain.repository.ScheduleRepository
+import com.example.lifemanager.domain.repository.HabitRepository
 import com.example.lifemanager.domain.repository.TodoRepository
 import com.example.lifemanager.notification.ReminderScheduler
 import com.example.lifemanager.notification.ReminderSchedulerContract
@@ -34,6 +36,11 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindScheduleRepository(impl: ScheduleRepositoryImpl): ScheduleRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindHabitRepository(impl: HabitRepositoryImpl): HabitRepository
+
 }
 
 @Module

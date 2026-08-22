@@ -3,6 +3,7 @@ package com.example.lifemanager.data.local
 import androidx.room.TypeConverter
 import com.example.lifemanager.domain.model.TodoPriority
 import com.example.lifemanager.domain.model.ScheduleRepeatRule
+import com.example.lifemanager.domain.model.HabitFrequencyType
 import java.time.Instant
 
 class Converters {
@@ -23,4 +24,8 @@ class Converters {
 
     @TypeConverter
     fun toScheduleRepeatRule(value: String): ScheduleRepeatRule = ScheduleRepeatRule.valueOf(value)
+
+    @TypeConverter fun fromHabitFrequencyType(value: HabitFrequencyType): String = value.name
+    @TypeConverter fun toHabitFrequencyType(value: String): HabitFrequencyType = HabitFrequencyType.valueOf(value)
+
 }
