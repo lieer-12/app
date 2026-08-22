@@ -210,7 +210,7 @@ Expected: compilation fails because state and ViewModel are absent.
 
 - [ ] **Step 3: Implement state composition and user events**
 
-Use `visibleMonth.flatMapLatest { repository.observeRecords(rangeStart, rangeEnd) }`, where the range includes the month, today and preceding 53 weeks. Combine habits, records, tab, editor, selected stats habit and errors with `stateIn(viewModelScope, SharingStarted.Eagerly, HabitUiState())`. Derive cards/calendar/heatmap summaries in pure helpers, not Composables. Select the first habit if the selected statistics habit disappears. Validate before save; keep the editor open on errors.
+Use `visibleMonth.flatMapLatest { repository.observeRecords(rangeStart, rangeEnd) }`, where `rangeStart` is the earliest loaded habit start date and `rangeEnd` includes the displayed month and today. This retains complete history for correct longest-streak calculation while the UI renders only the latest 53 weeks of it. Combine habits, records, tab, editor, selected stats habit and errors with `stateIn(viewModelScope, SharingStarted.Eagerly, HabitUiState())`. Derive cards/calendar/heatmap summaries in pure helpers, not Composables. Select the first habit if the selected statistics habit disappears. Validate before save; keep the editor open on errors.
 
 - [ ] **Step 4: Run focused tests to confirm GREEN**
 
