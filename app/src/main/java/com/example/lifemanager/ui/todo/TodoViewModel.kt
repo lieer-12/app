@@ -29,7 +29,7 @@ import javax.inject.Inject
 class TodoViewModel @Inject constructor(
     private val observeTodos: ObserveTodosUseCase,
     private val saveTodo: SaveTodoUseCase,
-    private val deleteTodo: DeleteTodoUseCase,
+    private val deleteTodoUseCase: DeleteTodoUseCase,
     private val toggleTodo: ToggleTodoUseCase,
     private val repository: TodoRepository,
     private val reminderScheduler: ReminderSchedulerContract,
@@ -42,7 +42,7 @@ class TodoViewModel @Inject constructor(
     ) : this(
         observeTodos = ObserveTodosUseCase(repository),
         saveTodo = SaveTodoUseCase(repository),
-        deleteTodo = DeleteTodoUseCase(repository),
+        deleteTodoUseCase = DeleteTodoUseCase(repository),
         toggleTodo = ToggleTodoUseCase(repository),
         repository = repository,
         reminderScheduler = reminderScheduler,
@@ -167,7 +167,7 @@ class TodoViewModel @Inject constructor(
     fun deleteTodo(todoId: Long) {
         viewModelScope.launch(dispatcher) {
             try {
-                deleteTodo(todoId)
+                deleteTodoUseCase(todoId)
                 reminderScheduler.cancel(todoId)
             } catch (error: Exception) {
                 errorMessage.value = "删除失败：${error.message ?: "未知错误"}"

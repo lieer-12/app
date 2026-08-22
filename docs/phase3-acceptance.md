@@ -20,6 +20,7 @@
 | --- | --- |
 | `:app:testDebugUnitTest --tests '*HabitRulesTest' --no-daemon` | 通过；14 个 `HabitRulesTest` 测试通过。 |
 | `:app:testDebugUnitTest --tests '*HabitViewModelTest' --no-daemon` | 通过；2 个 ViewModel 行为测试通过。 |
+| `:app:testDebugUnitTest --no-daemon` | 通过；33 个 JVM 单元测试通过，0 failures / 0 errors / 0 skipped，覆盖 Todo 删除回归。 |
 | `:app:assembleDebug --no-daemon` | 通过；已生成 debug APK。 |
 | `:app:assembleDebugAndroidTest --no-daemon` | 通过；DAO 与 v2→v3 迁移测试源码已编译到 Android 测试 APK。 |
 | `adb devices` | 未发现已连接设备或模拟器。 |
@@ -29,5 +30,4 @@
 - `HabitDaoTest` 和 `HabitMigrationTest` 尚未在 Android 设备或模拟器上执行，因此不将它们标记为通过；测试会验证唯一记录、级联删除和旧待办数据在 v2→v3 后仍存在。
 - Phase 3 不包含订阅、打卡提醒、暂停或归档；未建立对应 UI、导航、实体字段或假数据。
 - 构建仍显示既有 AGP 旧 DSL、Kotlin 注解目标、KAPT 选项和 `TodoTagCrossRef.tagId` 索引警告；本 Phase 未对无关的既有模块做重构。
-- 完整 `:app:testDebugUnitTest` 在既有 `TodoViewModelTest` 的删除用例中因持续 Flow 的测试调度循环无法自然退出；线程转储已定位到该既有测试，未修改其应用逻辑。Phase 3 的 `HabitRulesTest` 和 `HabitViewModelTest` 聚焦运行均通过。
 - 当前机器需要经本地 `127.0.0.1:7897` 代理访问 AndroidX/Google Maven；依赖已解析后可离线构建已缓存内容。
