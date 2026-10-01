@@ -4,6 +4,7 @@ import androidx.room.TypeConverter
 import com.example.lifemanager.domain.model.TodoPriority
 import com.example.lifemanager.domain.model.ScheduleRepeatRule
 import com.example.lifemanager.domain.model.HabitFrequencyType
+import com.example.lifemanager.domain.model.BillingCycle
 import java.time.Instant
 
 class Converters {
@@ -27,5 +28,7 @@ class Converters {
 
     @TypeConverter fun fromHabitFrequencyType(value: HabitFrequencyType): String = value.name
     @TypeConverter fun toHabitFrequencyType(value: String): HabitFrequencyType = HabitFrequencyType.valueOf(value)
+    @TypeConverter fun fromBillingCycle(value: BillingCycle): String = value.name
+    @TypeConverter fun toBillingCycle(value: String): BillingCycle = BillingCycle.valueOf(value)
 
 }

@@ -16,6 +16,10 @@ import com.example.lifemanager.data.local.entity.ScheduleExceptionEntity
 import com.example.lifemanager.data.local.entity.TagEntity
 import com.example.lifemanager.data.local.entity.TodoEntity
 import com.example.lifemanager.data.local.entity.TodoTagCrossRef
+import com.example.lifemanager.data.local.dao.SubscriptionDao
+import com.example.lifemanager.data.local.entity.SubscriptionEntity
+import com.example.lifemanager.data.local.entity.SubscriptionPaymentEntity
+import com.example.lifemanager.data.local.entity.SubscriptionReminderEntity
 
 @Database(
     entities = [
@@ -26,8 +30,11 @@ import com.example.lifemanager.data.local.entity.TodoTagCrossRef
         ScheduleExceptionEntity::class,
         HabitEntity::class,
         HabitRecordEntity::class,
+        SubscriptionEntity::class,
+        SubscriptionPaymentEntity::class,
+        SubscriptionReminderEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -37,6 +44,7 @@ abstract class LifeManagerDatabase : RoomDatabase() {
     abstract fun todoTagDao(): TodoTagDao
     abstract fun scheduleDao(): ScheduleDao
     abstract fun habitDao(): HabitDao
+    abstract fun subscriptionDao(): SubscriptionDao
 
     companion object {
         val MIGRATIONS: Array<Migration> = arrayOf(
@@ -111,6 +119,16 @@ abstract class LifeManagerDatabase : RoomDatabase() {
                     )
                     db.execSQL("CREATE INDEX IF NOT EXISTS index_habit_records_habitId ON habit_records (habitId)")
                     db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_habit_records_habitId_date ON habit_records (habitId, date)")
+                }
+            },
+            object : Migration(3, 4) {
+                override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                    db.execSQL("CREATE TABLE IF NOT EXISTS subscriptions (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, appName TEXT NOT NULL, amountMinor INTEGER NOT NULL, currency TEXT NOT NULL, billingCycle TEXT NOT NULL, nextBillingDate INTEGER NOT NULL, startDate INTEGER NOT NULL, category TEXT, note TEXT, isActive INTEGER NOT NULL, cancelDate INTEGER, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)")
+                    db.execSQL("CREATE INDEX IF NOT EXISTS index_subscriptions_nextBillingDate ON subscriptions (nextBillingDate)")
+                    db.execSQL("CREATE TABLE IF NOT EXISTS subscription_payments (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, subscriptionId INTEGER NOT NULL, amountMinor INTEGER NOT NULL, currency TEXT NOT NULL, paidAt INTEGER NOT NULL, note TEXT, FOREIGN KEY(subscriptionId) REFERENCES subscriptions(id) ON DELETE CASCADE)")
+                    db.execSQL("CREATE INDEX IF NOT EXISTS index_subscription_payments_subscriptionId ON subscription_payments (subscriptionId)")
+                    db.execSQL("CREATE TABLE IF NOT EXISTS subscription_reminders (subscriptionId INTEGER NOT NULL, daysBefore INTEGER NOT NULL, PRIMARY KEY(subscriptionId, daysBefore), FOREIGN KEY(subscriptionId) REFERENCES subscriptions(id) ON DELETE CASCADE)")
+                    db.execSQL("CREATE INDEX IF NOT EXISTS index_subscription_reminders_subscriptionId ON subscription_reminders (subscriptionId)")
                 }
             },
         )

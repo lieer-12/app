@@ -6,6 +6,8 @@ import com.example.lifemanager.data.repository.HabitRepositoryImpl
 import com.example.lifemanager.domain.repository.ScheduleRepository
 import com.example.lifemanager.domain.repository.HabitRepository
 import com.example.lifemanager.domain.repository.TodoRepository
+import com.example.lifemanager.domain.repository.SubscriptionRepository
+import com.example.lifemanager.data.repository.SubscriptionRepositoryImpl
 import com.example.lifemanager.notification.ReminderScheduler
 import com.example.lifemanager.notification.ReminderSchedulerContract
 import com.example.lifemanager.notification.ScheduleReminderScheduler
@@ -40,6 +42,10 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindHabitRepository(impl: HabitRepositoryImpl): HabitRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindSubscriptionRepository(impl: SubscriptionRepositoryImpl): SubscriptionRepository
 
 }
 
