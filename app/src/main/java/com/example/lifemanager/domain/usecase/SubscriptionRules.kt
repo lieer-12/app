@@ -7,8 +7,11 @@ import com.example.lifemanager.domain.model.SubscriptionCategoryStats
 import com.example.lifemanager.domain.model.SubscriptionMonthStats
 import com.example.lifemanager.domain.model.SubscriptionPayment
 import com.example.lifemanager.domain.model.SubscriptionStats
+import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.temporal.ChronoUnit
+import java.util.Currency
 
 object SubscriptionRules {
     private const val CNY = "CNY"
@@ -16,15 +19,26 @@ object SubscriptionRules {
     fun validate(subscription: Subscription): String? = when {
         subscription.appName.isBlank() -> "订阅名称不能为空"
         subscription.amountMinor <= 0 -> "金额必须大于 0"
+        currencyOrNull(subscription.currency) == null -> "币种必须为有效的 ISO 4217 代码"
         subscription.startDate.isAfter(subscription.nextBillingDate) -> "开始日期不能晚于下次扣费日期"
         subscription.cancelDate != null && subscription.cancelDate.isBefore(subscription.startDate) -> "取消日期不能早于开始日期"
         else -> null
     }
 
+    /** Converts a positive decimal amount to minor units without rounding or floating point. */
+    fun parseAmountMinor(amount: String, currency: String = CNY): Long? {
+        val fractionDigits = currencyOrNull(currency)?.defaultFractionDigits ?: return null
+        if (fractionDigits < 0) return null
+        return runCatching {
+            BigDecimal(amount.trim()).movePointRight(fractionDigits).longValueExact()
+        }.getOrNull()?.takeIf { it > 0 }
+    }
+
     fun effectiveNextBillingDate(subscription: Subscription, today: LocalDate): LocalDate? {
         if (!subscription.isActive) return null
-        var date = subscription.nextBillingDate
-        while (date.isBefore(today)) date = date.advance(subscription.billingCycle)
+        val anchor = subscription.nextBillingDate
+        val cycleIndex = anchor.cycleIndexOnOrAfter(today, subscription.billingCycle).coerceAtLeast(0)
+        val date = anchor.occurrence(subscription.billingCycle, cycleIndex)
         return date.takeUnless { subscription.cancelDate?.let(date::isAfter) == true }
     }
 
@@ -34,14 +48,17 @@ object SubscriptionRules {
         rangeEnd: LocalDate,
     ): List<LocalDate> {
         if (!subscription.isActive || rangeEnd.isBefore(rangeStart)) return emptyList()
-        var date = subscription.nextBillingDate
-        while (date.previous(subscription.billingCycle).let { !it.isBefore(subscription.startDate) && !it.isBefore(rangeStart) }) {
-            date = date.previous(subscription.billingCycle)
-        }
+        val firstDate = maxOf(rangeStart, subscription.startDate)
+        val lastDate = subscription.cancelDate?.let { minOf(rangeEnd, it) } ?: rangeEnd
+        if (lastDate.isBefore(firstDate)) return emptyList()
+        val anchor = subscription.nextBillingDate
+        var cycleIndex = anchor.cycleIndexOnOrAfter(firstDate, subscription.billingCycle)
+        var date = anchor.occurrence(subscription.billingCycle, cycleIndex)
         return buildList {
-            while (!date.isAfter(rangeEnd)) {
-                if (!date.isBefore(rangeStart) && (subscription.cancelDate == null || !date.isAfter(subscription.cancelDate))) add(date)
-                date = date.advance(subscription.billingCycle)
+            while (!date.isAfter(lastDate)) {
+                add(date)
+                cycleIndex++
+                date = anchor.occurrence(subscription.billingCycle, cycleIndex)
             }
         }
     }
@@ -96,18 +113,30 @@ object SubscriptionRules {
         }
     }
 
-    private fun LocalDate.advance(cycle: BillingCycle): LocalDate = when (cycle) {
-        BillingCycle.WEEKLY -> plusWeeks(1)
-        BillingCycle.MONTHLY -> plusMonths(1)
-        BillingCycle.QUARTERLY -> plusMonths(3)
-        BillingCycle.YEARLY -> plusYears(1)
+    private fun currencyOrNull(code: String): Currency? = try {
+        Currency.getInstance(code)
+    } catch (_: IllegalArgumentException) {
+        null
     }
 
-    private fun LocalDate.previous(cycle: BillingCycle): LocalDate = when (cycle) {
-        BillingCycle.WEEKLY -> minusWeeks(1)
-        BillingCycle.MONTHLY -> minusMonths(1)
-        BillingCycle.QUARTERLY -> minusMonths(3)
-        BillingCycle.YEARLY -> minusYears(1)
+    private fun LocalDate.cycleIndexOnOrAfter(target: LocalDate, cycle: BillingCycle): Long {
+        // Use calendar buckets rather than clamped dates to seek directly, including before the anchor.
+        val approximateIndex = when (cycle) {
+            BillingCycle.WEEKLY -> Math.floorDiv(ChronoUnit.DAYS.between(this, target), 7L)
+            BillingCycle.MONTHLY -> ChronoUnit.MONTHS.between(YearMonth.from(this), YearMonth.from(target))
+            BillingCycle.QUARTERLY -> Math.floorDiv(
+                ChronoUnit.MONTHS.between(YearMonth.from(this), YearMonth.from(target)), 3L,
+            )
+            BillingCycle.YEARLY -> target.year.toLong() - year.toLong()
+        }
+        return if (occurrence(cycle, approximateIndex).isBefore(target)) approximateIndex + 1 else approximateIndex
+    }
+
+    private fun LocalDate.occurrence(cycle: BillingCycle, cycleIndex: Long): LocalDate = when (cycle) {
+        BillingCycle.WEEKLY -> plusWeeks(cycleIndex)
+        BillingCycle.MONTHLY -> plusMonths(cycleIndex)
+        BillingCycle.QUARTERLY -> plusMonths(cycleIndex * 3)
+        BillingCycle.YEARLY -> plusYears(cycleIndex)
     }
 
     private fun csv(value: String): String = if (value.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) {
