@@ -9,6 +9,7 @@ import com.example.lifemanager.domain.repository.ScheduleRepository
 import com.example.lifemanager.domain.repository.SubscriptionRepository
 import com.example.lifemanager.domain.usecase.SubscriptionOperationCoordinator
 import com.example.lifemanager.domain.usecase.TodoOperationCoordinator
+import com.example.lifemanager.domain.usecase.ScheduleOperationCoordinator
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
@@ -36,7 +37,7 @@ class BootReceiver : BroadcastReceiver() {
                         else reminderScheduler.schedule(todo.id, todo.title, dueAt)
                     }
                 }
-                scheduleRepository.getSchedules().forEach(scheduleReminderScheduler::schedule)
+                ScheduleOperationCoordinator.run { scheduleRepository.getSchedules().forEach(scheduleReminderScheduler::schedule) }
                 SubscriptionOperationCoordinator.run {
                     subscriptionRepository.getSubscriptions().forEach { subscription ->
                         subscriptionReminderScheduler.schedule(subscription, subscriptionRepository.getReminderDays(subscription.id))

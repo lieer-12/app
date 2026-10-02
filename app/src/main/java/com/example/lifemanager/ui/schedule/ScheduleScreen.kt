@@ -66,16 +66,15 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun ScheduleScreen(
     initialScheduleId: Long? = null,
+    notificationToken: Long? = null,
+    onNotificationConsumed: (Long) -> Unit = {},
     viewModel: ScheduleViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    var initialHandled by remember(initialScheduleId) { mutableStateOf(false) }
-    LaunchedEffect(initialScheduleId, state.schedules) {
-        if (!initialHandled) {
-            state.schedules.firstOrNull { it.id == initialScheduleId }?.let {
-                viewModel.openEditor(it)
-                initialHandled = true
-            }
+    LaunchedEffect(initialScheduleId, notificationToken) {
+        initialScheduleId?.takeIf { it > 0L }?.let { id ->
+            viewModel.openNotificationDetail(id)
+            notificationToken?.let(onNotificationConsumed)
         }
     }
 
@@ -216,42 +215,44 @@ private fun ScheduleEditorDialog(
     onDelete: (Long) -> Unit,
 ) {
     var pickerTarget by remember { mutableStateOf<PickerTarget?>(null) }
+    LaunchedEffect(state.isSaving) { if (state.isSaving) pickerTarget = null }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (state.editingId == null) "新建日程" else "编辑日程") },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = state.title, onValueChange = onTitleChanged, label = { Text("标题") }, singleLine = true)
+                OutlinedTextField(value = state.title, onValueChange = onTitleChanged, label = { Text("标题") }, singleLine = true, enabled = !state.isSaving)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = state.isAllDay, onCheckedChange = onAllDayChanged)
+                    Checkbox(checked = state.isAllDay, onCheckedChange = onAllDayChanged, enabled = !state.isSaving)
                     Text("全天事件")
                 }
                 if (state.isAllDay) {
-                    DateLine("开始日期", state.allDayStartDate, { pickerTarget = PickerTarget.ALL_DAY_START })
-                    DateLine("结束日期", state.allDayEndDate, { pickerTarget = PickerTarget.ALL_DAY_END })
+                    DateLine("开始日期", state.allDayStartDate, { pickerTarget = PickerTarget.ALL_DAY_START }, enabled = !state.isSaving)
+                    DateLine("结束日期", state.allDayEndDate, { pickerTarget = PickerTarget.ALL_DAY_END }, enabled = !state.isSaving)
                 } else {
-                    DateLine("开始日期", state.startAt?.atZone(ZoneId.systemDefault())?.toLocalDate(), { pickerTarget = PickerTarget.START_DATE })
-                    DateLine("结束日期", state.endAt?.atZone(ZoneId.systemDefault())?.toLocalDate(), { pickerTarget = PickerTarget.END_DATE })
-                    TimeLine("开始时间", state.startAt, { pickerTarget = PickerTarget.START_TIME })
-                    TimeLine("结束时间", state.endAt, { pickerTarget = PickerTarget.END_TIME })
+                    DateLine("开始日期", state.startAt?.atZone(ZoneId.systemDefault())?.toLocalDate(), { pickerTarget = PickerTarget.START_DATE }, enabled = !state.isSaving)
+                    DateLine("结束日期", state.endAt?.atZone(ZoneId.systemDefault())?.toLocalDate(), { pickerTarget = PickerTarget.END_DATE }, enabled = !state.isSaving)
+                    TimeLine("开始时间", state.startAt, { pickerTarget = PickerTarget.START_TIME }, enabled = !state.isSaving)
+                    TimeLine("结束时间", state.endAt, { pickerTarget = PickerTarget.END_TIME }, enabled = !state.isSaving)
                 }
-                OutlinedTextField(value = state.location, onValueChange = onLocationChanged, label = { Text("地点") })
-                OutlinedTextField(value = state.participants, onValueChange = onParticipantsChanged, label = { Text("参与者（文本）") })
-                OutlinedTextField(value = state.note, onValueChange = onNoteChanged, label = { Text("备注") })
-                OutlinedTextField(value = state.reminderMinutes, onValueChange = onReminderChanged, label = { Text("提前提醒分钟（留空关闭）") }, singleLine = true)
+                OutlinedTextField(value = state.location, onValueChange = onLocationChanged, label = { Text("地点") }, enabled = !state.isSaving)
+                OutlinedTextField(value = state.participants, onValueChange = onParticipantsChanged, label = { Text("参与者（文本）") }, enabled = !state.isSaving)
+                OutlinedTextField(value = state.note, onValueChange = onNoteChanged, label = { Text("备注") }, enabled = !state.isSaving)
+                OutlinedTextField(value = state.reminderMinutes, onValueChange = onReminderChanged, label = { Text("提前提醒分钟（留空关闭）") }, singleLine = true, enabled = !state.isSaving)
                 Text("重复")
                 Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     ScheduleRepeatRule.entries.forEach { rule ->
-                        FilterChip(selected = state.repeatRule == rule, onClick = { onRepeatRuleChanged(rule) }, label = { Text(rule.label()) })
+                        FilterChip(selected = state.repeatRule == rule, onClick = { onRepeatRuleChanged(rule) }, label = { Text(rule.label()) }, enabled = !state.isSaving)
                     }
                 }
                 Text("颜色")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(0xFF00695C.toInt(), 0xFF3F51B5.toInt(), 0xFFC62828.toInt(), 0xFFEF6C00.toInt()).forEach { color ->
-                        AssistChip(onClick = { onColorChanged(color) }, label = { Text(if (state.color == color) "已选" else "颜色") }, leadingIcon = { Box(Modifier.size(10.dp).background(Color(color))) })
+                        AssistChip(onClick = { onColorChanged(color) }, label = { Text(if (state.color == color) "已选" else "颜色") }, leadingIcon = { Box(Modifier.size(10.dp).background(Color(color))) }, enabled = !state.isSaving)
                     }
                 }
                 state.validationMessage?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
+                if (state.pendingNotificationId != null) Text("通知日程等待查看；保存或关闭当前草稿后打开")
             }
         },
         confirmButton = {
@@ -261,8 +262,8 @@ private fun ScheduleEditorDialog(
         },
         dismissButton = {
             Row {
-                if (state.editingId != null) TextButton(onClick = { onDelete(state.editingId) }) { Text("删除") }
-                TextButton(onClick = onDismiss) { Text("取消") }
+                if (state.editingId != null) TextButton(onClick = { onDelete(state.editingId) }, enabled = !state.isSaving) { Text("删除") }
+                TextButton(onClick = onDismiss, enabled = !state.isSaving) { Text("取消") }
             }
         },
     )
@@ -307,8 +308,8 @@ private fun ScheduleEditorDialog(
     }
 }
 
-@Composable private fun DateLine(label: String, date: LocalDate?, onClick: () -> Unit) = Row(verticalAlignment = Alignment.CenterVertically) { Text("$label：${date ?: "未设置"}", modifier = Modifier.weight(1f)); TextButton(onClick = onClick) { Text("选择") } }
-@Composable private fun TimeLine(label: String, time: Instant?, onClick: () -> Unit) = Row(verticalAlignment = Alignment.CenterVertically) { Text("$label：${time?.atZone(ZoneId.systemDefault())?.format(DateTimeFormatter.ofPattern("HH:mm")) ?: "未设置"}", modifier = Modifier.weight(1f)); TextButton(onClick = onClick) { Text("选择") } }
+@Composable private fun DateLine(label: String, date: LocalDate?, onClick: () -> Unit, enabled: Boolean = true) = Row(verticalAlignment = Alignment.CenterVertically) { Text("$label：${date ?: "未设置"}", modifier = Modifier.weight(1f)); TextButton(onClick = onClick, enabled = enabled) { Text("选择") } }
+@Composable private fun TimeLine(label: String, time: Instant?, onClick: () -> Unit, enabled: Boolean = true) = Row(verticalAlignment = Alignment.CenterVertically) { Text("$label：${time?.atZone(ZoneId.systemDefault())?.format(DateTimeFormatter.ofPattern("HH:mm")) ?: "未设置"}", modifier = Modifier.weight(1f)); TextButton(onClick = onClick, enabled = enabled) { Text("选择") } }
 private fun periodTitle(state: ScheduleUiState): String = when (state.viewMode) {
     CalendarViewMode.MONTH -> YearMonth.from(state.selectedDate).format(DateTimeFormatter.ofPattern("yyyy年M月"))
     CalendarViewMode.WEEK -> {

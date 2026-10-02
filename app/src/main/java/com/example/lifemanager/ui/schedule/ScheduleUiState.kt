@@ -26,6 +26,9 @@ data class ScheduleEditorState(
     val validationMessage: String? = null,
     val awaitingConflictConfirmation: Boolean = false,
     val isSaving: Boolean = false,
+    val conflictingSchedules: List<Schedule> = emptyList(),
+    val pendingNotificationId: Long? = null,
+    val pendingNotificationToken: Long? = null,
 )
 
 data class ScheduleUiState(

@@ -11,6 +11,7 @@ import com.example.lifemanager.data.local.LifeManagerDatabase
 import com.example.lifemanager.data.repository.toDomain
 import com.example.lifemanager.domain.usecase.SubscriptionOperationCoordinator
 import com.example.lifemanager.domain.usecase.TodoOperationCoordinator
+import com.example.lifemanager.domain.usecase.ScheduleOperationCoordinator
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 
@@ -35,7 +36,9 @@ class ReminderReconciliationWorker(
                     else scheduler.schedule(todo.id, todo.title, Instant.ofEpochMilli(dueAt))
                 }
             }
-            database.scheduleDao().getAll().forEach { scheduleScheduler.schedule(it.toDomain()) }
+            ScheduleOperationCoordinator.run {
+                database.scheduleDao().getAll().forEach { scheduleScheduler.schedule(it.toDomain()) }
+            }
             SubscriptionOperationCoordinator.run {
                 val subscriptionDao = database.subscriptionDao()
                 subscriptionDao.getAll().forEach { subscription ->

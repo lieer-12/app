@@ -15,7 +15,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.lifecycle.viewModelScope
 import com.example.lifemanager.domain.model.*
 import com.example.lifemanager.domain.repository.TodoRepository
+import com.example.lifemanager.domain.repository.ScheduleRepository
 import com.example.lifemanager.notification.ReminderSchedulerContract
+import com.example.lifemanager.notification.ScheduleReminderSchedulerContract
+import com.example.lifemanager.ui.schedule.ScheduleViewModel
 import com.example.lifemanager.ui.theme.LifeManagerTheme
 import com.example.lifemanager.ui.navigation.NavGraph
 import com.example.lifemanager.ui.navigation.TodoNavigationRequest
@@ -39,10 +42,11 @@ import kotlin.test.assertTrue
 class TodoScreenRegressionTest {
     @get:Rule val compose = createComposeRule()
     private lateinit var model: TodoViewModel
+    private var scheduleModel: ScheduleViewModel? = null
     private val oldZone = TimeZone.getDefault()
     private val requestId = mutableStateOf<Long?>(null)
 
-    @After fun cleanup() { if (::model.isInitialized) model.viewModelScope.cancel(); TimeZone.setDefault(oldZone) }
+    @After fun cleanup() { if (::model.isInitialized) model.viewModelScope.cancel(); scheduleModel?.viewModelScope?.cancel(); TimeZone.setDefault(oldZone) }
 
     @Test fun notificationOpensTargetHiddenBySearch() {
         model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "通知目标"))), NoAlarms, Dispatchers.IO)
@@ -88,7 +92,9 @@ class TodoScreenRegressionTest {
     @Test fun notificationReturningFromSettingsUsesRetainedTodoDraftOwner() {
         model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "通知目标"))), NoAlarms, Dispatchers.IO)
         val request = mutableStateOf<TodoNavigationRequest?>(null)
-        compose.setContent { LifeManagerTheme { NavGraph(todoViewModel = model, todoRequest = request.value,
+        val schedules = ScheduleViewModel(EmptySchedules(), NoScheduleAlarms, Dispatchers.IO)
+        scheduleModel = schedules
+        compose.setContent { LifeManagerTheme { NavGraph(todoViewModel = model, scheduleViewModel = schedules, todoRequest = request.value,
             onTodoConsumed = { token -> if (request.value?.token == token) request.value = null }) } }
         compose.waitForIdle()
         compose.onNode(hasText("设置") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))
@@ -104,6 +110,18 @@ class TodoScreenRegressionTest {
     private object NoAlarms : ReminderSchedulerContract {
         override fun schedule(todoId: Long, title: String, dueAt: Instant) = Unit
         override fun cancel(todoId: Long) = Unit
+    }
+    private object NoScheduleAlarms : ScheduleReminderSchedulerContract {
+        override fun schedule(schedule: Schedule) = Unit
+        override fun cancel(scheduleId: Long) = Unit
+    }
+    private class EmptySchedules : ScheduleRepository {
+        override fun observeSchedules() = MutableStateFlow(emptyList<Schedule>())
+        override suspend fun getSchedules() = emptyList<Schedule>()
+        override suspend fun getExceptions(scheduleId: Long) = emptyList<ScheduleException>()
+        override suspend fun saveException(exception: ScheduleException): Unit = error("Not used")
+        override suspend fun saveSchedule(schedule: Schedule): Long = error("Not used")
+        override suspend fun deleteSchedule(id: Long): Unit = error("Not used")
     }
     private class ScreenRepository(initial: List<Todo>) : TodoRepository {
         private val todos = MutableStateFlow(initial)

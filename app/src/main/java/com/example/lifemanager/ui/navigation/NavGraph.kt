@@ -26,6 +26,7 @@ import com.example.lifemanager.ui.habit.HabitScreen
 import com.example.lifemanager.ui.todo.TodoScreen
 import com.example.lifemanager.ui.todo.TodoViewModel
 import com.example.lifemanager.ui.schedule.ScheduleScreen
+import com.example.lifemanager.ui.schedule.ScheduleViewModel
 import com.example.lifemanager.ui.subscription.SubscriptionScreen
 import com.example.lifemanager.ui.subscription.SubscriptionViewModel
 
@@ -36,8 +37,10 @@ private const val HabitRoute = "habit"
 private const val SubscriptionRoute = "subscription"
 
 @Composable
-fun NavGraph(todoViewModel: TodoViewModel, modifier: Modifier = Modifier, todoRequest: TodoNavigationRequest? = null,
-    onTodoConsumed: (Long) -> Unit = {}, initialScheduleId: Long? = null,
+fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
+    modifier: Modifier = Modifier, todoRequest: TodoNavigationRequest? = null,
+    onTodoConsumed: (Long) -> Unit = {},
+    scheduleRequest: ScheduleNavigationRequest? = null, onScheduleConsumed: (Long) -> Unit = {},
     subscriptionRequest: SubscriptionNavigationRequest? = null, onSubscriptionConsumed: (Long) -> Unit = {}) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -50,12 +53,8 @@ fun NavGraph(todoViewModel: TodoViewModel, modifier: Modifier = Modifier, todoRe
         SettingsRoute to ("设置" to Icons.Outlined.Settings),
     )
 
-    LaunchedEffect(initialScheduleId) {
-        val destination = when {
-            initialScheduleId != null -> ScheduleRoute
-            else -> null
-        }
-        destination?.let { navController.navigate(it) { launchSingleTop = true } }
+    LaunchedEffect(scheduleRequest?.token) {
+        if (scheduleRequest != null) navController.navigate(ScheduleRoute) { launchSingleTop = true }
     }
     LaunchedEffect(todoRequest?.token) {
         if (todoRequest != null) navController.navigate(TodoRoute) { launchSingleTop = true }
@@ -81,7 +80,7 @@ fun NavGraph(todoViewModel: TodoViewModel, modifier: Modifier = Modifier, todoRe
     ) { paddingValues ->
         NavHost(
             navController = navController,
-            startDestination = if (initialScheduleId != null) ScheduleRoute else TodoRoute,
+            startDestination = TodoRoute,
             modifier = Modifier.padding(paddingValues),
         ) {
             composable(TodoRoute) {
@@ -94,7 +93,12 @@ fun NavGraph(todoViewModel: TodoViewModel, modifier: Modifier = Modifier, todoRe
                 )
             }
             composable(ScheduleRoute) {
-                ScheduleScreen(initialScheduleId = initialScheduleId)
+                ScheduleScreen(
+                    viewModel = scheduleViewModel,
+                    initialScheduleId = scheduleRequest?.scheduleId,
+                    notificationToken = scheduleRequest?.token,
+                    onNotificationConsumed = onScheduleConsumed,
+                )
             }
             composable(HabitRoute) {
                 HabitScreen()
