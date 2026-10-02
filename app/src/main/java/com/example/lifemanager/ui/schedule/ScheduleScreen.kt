@@ -61,6 +61,8 @@ import java.time.LocalTime
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import com.example.lifemanager.ui.settings.displayDate
+import com.example.lifemanager.ui.settings.displayDateTime
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -308,19 +310,21 @@ private fun ScheduleEditorDialog(
     }
 }
 
-@Composable private fun DateLine(label: String, date: LocalDate?, onClick: () -> Unit, enabled: Boolean = true) = Row(verticalAlignment = Alignment.CenterVertically) { Text("$label：${date ?: "未设置"}", modifier = Modifier.weight(1f)); TextButton(onClick = onClick, enabled = enabled) { Text("选择") } }
+@Composable private fun DateLine(label: String, date: LocalDate?, onClick: () -> Unit, enabled: Boolean = true) = Row(verticalAlignment = Alignment.CenterVertically) { Text("$label：${date?.let { displayDate(it) } ?: "未设置"}", modifier = Modifier.weight(1f)); TextButton(onClick = onClick, enabled = enabled) { Text("选择") } }
 @Composable private fun TimeLine(label: String, time: Instant?, onClick: () -> Unit, enabled: Boolean = true) = Row(verticalAlignment = Alignment.CenterVertically) { Text("$label：${time?.atZone(ZoneId.systemDefault())?.format(DateTimeFormatter.ofPattern("HH:mm")) ?: "未设置"}", modifier = Modifier.weight(1f)); TextButton(onClick = onClick, enabled = enabled) { Text("选择") } }
-private fun periodTitle(state: ScheduleUiState): String = when (state.viewMode) {
+@Composable private fun periodTitle(state: ScheduleUiState): String = when (state.viewMode) {
     CalendarViewMode.MONTH -> YearMonth.from(state.selectedDate).format(DateTimeFormatter.ofPattern("yyyy年M月"))
     CalendarViewMode.WEEK -> {
         val start = state.selectedDate.minusDays((state.selectedDate.dayOfWeek.value - 1).toLong())
         val end = start.plusDays(6)
-        "${start.format(DateTimeFormatter.ofPattern("M月d日"))} - ${end.format(DateTimeFormatter.ofPattern("M月d日"))}"
+        "${displayDate(start)} - ${displayDate(end)}"
     }
-    CalendarViewMode.DAY -> state.selectedDate.format(DateTimeFormatter.ofPattern("yyyy年M月d日"))
+    CalendarViewMode.DAY -> displayDate(state.selectedDate)
 }
 private fun CalendarViewMode.label() = when (this) { CalendarViewMode.MONTH -> "月"; CalendarViewMode.WEEK -> "周"; CalendarViewMode.DAY -> "日" }
 private fun ScheduleRepeatRule.label() = when (this) { ScheduleRepeatRule.NONE -> "不重复"; ScheduleRepeatRule.DAILY -> "每天"; ScheduleRepeatRule.WEEKLY -> "每周"; ScheduleRepeatRule.MONTHLY -> "每月"; ScheduleRepeatRule.YEARLY -> "每年"; ScheduleRepeatRule.CUSTOM -> "自定义" }
 private fun ScheduleOccurrence.occursOn(date: LocalDate): Boolean = (allDayStartDate ?: startAt!!.atZone(ZoneId.systemDefault()).toLocalDate()) <= date && (allDayEndDate ?: endAt!!.minusMillis(1).atZone(ZoneId.systemDefault()).toLocalDate()) >= date
-private fun ScheduleOccurrence.displayTime(): String = if (isAllDay) "全天" else "${startAt!!.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))} - ${endAt!!.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))}"
+@Composable private fun ScheduleOccurrence.displayTime(): String = if (isAllDay)
+    "全天 ${displayDate(allDayStartDate!!)} - ${displayDate(allDayEndDate!!)}"
+    else "${displayDateTime(startAt!!)} - ${displayDateTime(endAt!!)}"
 private enum class PickerTarget { START_DATE, END_DATE, ALL_DAY_START, ALL_DAY_END, START_TIME, END_TIME }

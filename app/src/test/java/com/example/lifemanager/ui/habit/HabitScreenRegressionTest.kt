@@ -6,6 +6,10 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.runtime.CompositionLocalProvider
+import com.example.lifemanager.ui.settings.LocalDateFormat
+import com.example.lifemanager.domain.model.DateFormat
 import androidx.lifecycle.viewModelScope
 import com.example.lifemanager.domain.model.Habit
 import com.example.lifemanager.domain.model.HabitFrequencyType
@@ -63,6 +67,31 @@ class HabitScreenRegressionTest {
         compose.onNodeWithContentDescription("撤销打卡：阅读").assertIsEnabled().performClick()
         compose.waitUntil(5000) { repository.records.value.isEmpty() }
         compose.onNodeWithContentDescription("打卡：阅读").assertIsNotEnabled()
+    }
+
+    @Test fun habitStartDateButtonUsesSelectedFormat() {
+        val habit = Habit(id = 1, name = "阅读", startDate = LocalDate.of(2026, 10, 2))
+        val viewModel = HabitViewModel(ScreenRepository(habit, emptyList()), Dispatchers.IO)
+        model = viewModel
+        viewModel.openEditor(habit)
+        compose.setContent { LifeManagerTheme { CompositionLocalProvider(LocalDateFormat provides DateFormat.DMY) {
+            HabitScreen(viewModel)
+        } } }
+        compose.onNodeWithText("开始日期：02-10-2026").assertExists()
+    }
+
+    @Test fun calendarCellAccessibilityDateUsesTheSelectedFormat() {
+        val today = LocalDate.now()
+        val repository = ScreenRepository(Habit(id = 1, name = "阅读", startDate = today), emptyList())
+        val viewModel = HabitViewModel(repository, Dispatchers.IO)
+        model = viewModel
+        compose.setContent { LifeManagerTheme { CompositionLocalProvider(LocalDateFormat provides DateFormat.DMY) {
+            HabitScreen(viewModel)
+        } } }
+        compose.waitUntil(5000) { viewModel.uiState.value.cards.size == 1 }
+        compose.onNodeWithText("统计").performClick()
+        val expected = today.format(java.time.format.DateTimeFormatter.ofPattern("dd-MM-uuuu"))
+        compose.onNodeWithContentDescription("$expected，应打卡，未完成").assertExists()
     }
 
     private fun show(habit: Habit, records: List<HabitRecord> = emptyList()): ScreenRepository {

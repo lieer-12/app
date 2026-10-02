@@ -53,6 +53,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lifemanager.domain.model.HabitFrequencyType
 import java.time.DayOfWeek
 import java.time.LocalDate
+import com.example.lifemanager.ui.settings.displayDate
 import java.time.YearMonth
 
 @Composable
@@ -295,7 +296,7 @@ private fun RowScope.CalendarDay(day: HabitCalendarDay) {
         day.isExpected -> MaterialTheme.colorScheme.secondaryContainer
         else -> Color.Transparent
     }
-    val label = "${day.date.year}年${day.date.monthValue}月${day.date.dayOfMonth}日，${if (day.isCompleted) "已打卡" else if (day.isExpected) "应打卡，未完成" else "非打卡日"}"
+    val label = "${displayDate(day.date)}，${if (day.isCompleted) "已打卡" else if (day.isExpected) "应打卡，未完成" else "非打卡日"}"
     Box(
         modifier = Modifier.weight(1f).height(44.dp).padding(3.dp).background(background).semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
@@ -311,10 +312,11 @@ private fun Heatmap(cells: List<HabitHeatmapCell>) {
                 cells.chunked(7).forEach { week ->
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         week.forEach { cell ->
+                            val accessibleDate = displayDate(cell.date)
                             val background = if (cell.count == 0) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary
                             Box(
                                 modifier = Modifier.size(12.dp).background(background).semantics {
-                                    contentDescription = "${cell.date}，${if (cell.count == 0) "无记录" else "1 次"}"
+                                    contentDescription = "$accessibleDate，${if (cell.count == 0) "无记录" else "1 次"}"
                                 },
                             )
                         }
@@ -376,7 +378,7 @@ private fun HabitEditorDialog(
                         }
                     }
                 }
-                item { OutlinedButton(onClick = { showDatePicker = true }) { Text("开始日期：${editor.startDate}") } }
+                item { OutlinedButton(onClick = { showDatePicker = true }) { Text("开始日期：${displayDate(editor.startDate)}") } }
                 item { OutlinedTextField(editor.note, onNoteChanged, label = { Text("备注（可选）") }, modifier = Modifier.fillMaxWidth()) }
                 editor.validationMessage?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
             }

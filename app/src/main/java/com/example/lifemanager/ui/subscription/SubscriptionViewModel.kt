@@ -6,6 +6,7 @@ import com.example.lifemanager.di.IoDispatcher
 import com.example.lifemanager.domain.model.Subscription
 import com.example.lifemanager.domain.model.SubscriptionPayment
 import com.example.lifemanager.domain.repository.SubscriptionRepository
+import com.example.lifemanager.domain.repository.SettingsRepository
 import com.example.lifemanager.domain.usecase.SubscriptionRules
 import com.example.lifemanager.domain.usecase.SubscriptionOperationCoordinator
 import com.example.lifemanager.notification.SubscriptionReminderSchedulerContract
@@ -25,6 +26,7 @@ import kotlinx.coroutines.launch
 class SubscriptionViewModel @Inject constructor(
     private val repository: SubscriptionRepository,
     private val scheduler: SubscriptionReminderSchedulerContract,
+    private val settingsRepository: SettingsRepository,
     @param:IoDispatcher private val dispatcher: CoroutineDispatcher,
 ) : ViewModel() {
     private val controls = MutableStateFlow(SubscriptionUiState())
@@ -107,20 +109,23 @@ class SubscriptionViewModel @Inject constructor(
             currency = subscription?.currency ?: "CNY", billingCycle = subscription?.billingCycle ?: com.example.lifemanager.domain.model.BillingCycle.MONTHLY,
             nextBillingDate = (subscription?.nextBillingDate ?: LocalDate.now()).toString(),
             startDate = (subscription?.startDate ?: LocalDate.now()).toString(), category = subscription?.category.orEmpty(),
-            note = subscription?.note.orEmpty(), isLoadingReminders = subscription != null)) }
-        if (subscription != null) viewModelScope.launch(dispatcher) {
+            note = subscription?.note.orEmpty(), isLoadingReminders = true)) }
+        viewModelScope.launch(dispatcher) {
             try {
-                val days = repository.getReminderDays(subscription.id)
+                val defaults = if (subscription == null) settingsRepository.getSettings() else null
+                val days = defaults?.defaultReminderDays ?: repository.getReminderDays(subscription!!.id)
                 controls.update { state ->
                     if (state.editor.sessionId == generation && state.editor.isOpen)
-                        state.copy(editor = state.editor.copy(reminderDays = days, isLoadingReminders = false))
+                        state.copy(editor = state.editor.copy(currency = defaults?.defaultCurrency ?: state.editor.currency,
+                            reminderDays = days, isLoadingReminders = false))
                     else state
                 }
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
                 controls.update { state ->
                     if (state.editor.sessionId == generation && state.editor.isOpen)
-                        state.copy(editor = state.editor.copy(validationMessage = "读取提醒配置失败，请关闭后重试"))
+                        state.copy(editor = state.editor.copy(isLoadingReminders = false, preferencesError =
+                            if (subscription == null) "读取新建订阅偏好失败，请关闭后重试" else "读取提醒配置失败，请关闭后重试"))
                     else state
                 }
                 // Keep saving disabled: do not silently replace unread reminder settings.
@@ -138,7 +143,7 @@ class SubscriptionViewModel @Inject constructor(
     }
     fun saveSubscription() {
         val editor = controls.value.editor
-        if (!editor.isOpen || editor.isSaving || editor.isLoadingReminders || controls.value.isBusy) return
+        if (!editor.isOpen || editor.isSaving || editor.isLoadingReminders || editor.preferencesError != null || controls.value.isBusy) return
         val currency = editor.currency.trim().uppercase(Locale.ROOT)
         val amount = SubscriptionRules.parseAmountMinor(editor.amount, currency)
         val next = parseDate(editor.nextBillingDate)

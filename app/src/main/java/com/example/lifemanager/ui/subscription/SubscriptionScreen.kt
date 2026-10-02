@@ -24,6 +24,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lifemanager.domain.usecase.SubscriptionRules
 import java.time.LocalDate
+import com.example.lifemanager.ui.settings.displayDate
 import java.time.temporal.ChronoUnit
 
 @Composable
@@ -102,7 +103,7 @@ fun SubscriptionContent(state: SubscriptionUiState, viewModel: SubscriptionViewM
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(subscription.appName, style = MaterialTheme.typography.titleMedium)
                                 Text("${moneyText(subscription.amountMinor, subscription.currency)} / ${cycleLabel(subscription.billingCycle)}")
-                                Text(if (due != null) "下次扣费 $due · 还有 ${ChronoUnit.DAYS.between(LocalDate.now(), due)} 天" else if (!subscription.isActive) "已取消 · 历史记录保留" else "无可用的未来扣费日期")
+                                Text(if (due != null) "下次扣费 ${displayDate(due)} · 还有 ${ChronoUnit.DAYS.between(LocalDate.now(), due)} 天" else if (!subscription.isActive) "已取消 · 历史记录保留" else "无可用的未来扣费日期")
                                 subscription.category?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                             }
                         }

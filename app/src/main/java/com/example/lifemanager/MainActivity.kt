@@ -3,6 +3,9 @@ package com.example.lifemanager
 import android.os.Bundle
 import android.content.Intent
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.CompositionLocalProvider
+import com.example.lifemanager.ui.settings.LocalDateFormat
+import com.example.lifemanager.domain.model.DateFormat
 import androidx.activity.ComponentActivity
 import androidx.activity.viewModels
 import androidx.activity.compose.setContent
@@ -15,6 +18,7 @@ import com.example.lifemanager.ui.navigation.ScheduleNavigationViewModel
 import com.example.lifemanager.ui.schedule.ScheduleViewModel
 import com.example.lifemanager.ui.todo.TodoViewModel
 import com.example.lifemanager.ui.theme.LifeManagerTheme
+import com.example.lifemanager.ui.settings.SettingsViewModel
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -24,6 +28,7 @@ class MainActivity : ComponentActivity() {
     // One module owner, retained across navigation entries and configuration changes.
     private val todoViewModel: TodoViewModel by viewModels()
     private val scheduleViewModel: ScheduleViewModel by viewModels()
+    private val settingsViewModel: SettingsViewModel by viewModels()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) receiveNotificationIntent(intent)
@@ -31,10 +36,14 @@ class MainActivity : ComponentActivity() {
             val subscriptionRequest by subscriptionNavigation.pending.collectAsStateWithLifecycle()
             val todoRequest by todoNavigation.pending.collectAsStateWithLifecycle()
             val scheduleRequest by scheduleNavigation.pending.collectAsStateWithLifecycle()
-            LifeManagerTheme {
-                NavGraph(todoViewModel = todoViewModel, todoRequest = todoRequest, onTodoConsumed = todoNavigation::consume,
-                    scheduleViewModel = scheduleViewModel, scheduleRequest = scheduleRequest, onScheduleConsumed = scheduleNavigation::consume,
-                    subscriptionRequest = subscriptionRequest, onSubscriptionConsumed = subscriptionNavigation::consume)
+            val settings by settingsViewModel.uiState.collectAsStateWithLifecycle()
+            LifeManagerTheme(themeMode = settings.settings?.theme) {
+                CompositionLocalProvider(LocalDateFormat provides (settings.settings?.dateFormat ?: DateFormat.YMD)) {
+                    NavGraph(todoViewModel = todoViewModel, settingsViewModel = settingsViewModel,
+                        todoRequest = todoRequest, onTodoConsumed = todoNavigation::consume,
+                        scheduleViewModel = scheduleViewModel, scheduleRequest = scheduleRequest, onScheduleConsumed = scheduleNavigation::consume,
+                        subscriptionRequest = subscriptionRequest, onSubscriptionConsumed = subscriptionNavigation::consume)
+                }
             }
         }
     }

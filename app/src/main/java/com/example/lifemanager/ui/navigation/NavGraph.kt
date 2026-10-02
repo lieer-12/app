@@ -22,6 +22,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.lifemanager.ui.settings.SettingsScreen
+import com.example.lifemanager.ui.settings.SettingsViewModel
 import com.example.lifemanager.ui.habit.HabitScreen
 import com.example.lifemanager.ui.todo.TodoScreen
 import com.example.lifemanager.ui.todo.TodoViewModel
@@ -29,6 +30,7 @@ import com.example.lifemanager.ui.schedule.ScheduleScreen
 import com.example.lifemanager.ui.schedule.ScheduleViewModel
 import com.example.lifemanager.ui.subscription.SubscriptionScreen
 import com.example.lifemanager.ui.subscription.SubscriptionViewModel
+import kotlinx.coroutines.flow.first
 
 private const val TodoRoute = "todo"
 private const val SettingsRoute = "settings"
@@ -37,7 +39,7 @@ private const val HabitRoute = "habit"
 private const val SubscriptionRoute = "subscription"
 
 @Composable
-fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
+fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel, settingsViewModel: SettingsViewModel,
     modifier: Modifier = Modifier, todoRequest: TodoNavigationRequest? = null,
     onTodoConsumed: (Long) -> Unit = {},
     scheduleRequest: ScheduleNavigationRequest? = null, onScheduleConsumed: (Long) -> Unit = {},
@@ -54,13 +56,22 @@ fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
     )
 
     LaunchedEffect(scheduleRequest?.token) {
-        if (scheduleRequest != null) navController.navigate(ScheduleRoute) { launchSingleTop = true }
+        if (scheduleRequest != null) {
+            navController.currentBackStackEntryFlow.first()
+            navController.navigate(ScheduleRoute) { launchSingleTop = true }
+        }
     }
     LaunchedEffect(todoRequest?.token) {
-        if (todoRequest != null) navController.navigate(TodoRoute) { launchSingleTop = true }
+        if (todoRequest != null) {
+            navController.currentBackStackEntryFlow.first()
+            navController.navigate(TodoRoute) { launchSingleTop = true }
+        }
     }
     LaunchedEffect(subscriptionRequest?.token) {
-        if (subscriptionRequest != null) navController.navigate(SubscriptionRoute) { launchSingleTop = true }
+        if (subscriptionRequest != null) {
+            navController.currentBackStackEntryFlow.first()
+            navController.navigate(SubscriptionRoute) { launchSingleTop = true }
+        }
     }
 
     Scaffold(
@@ -114,7 +125,7 @@ fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
                 SubscriptionScreen(viewModel = viewModel)
             }
             composable(SettingsRoute) {
-                SettingsScreen(onBack = { navController.popBackStack() })
+                SettingsScreen(onBack = { navController.popBackStack() }, viewModel = settingsViewModel)
             }
         }
     }

@@ -59,7 +59,8 @@ import com.example.lifemanager.domain.model.TodoPriority
 import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import com.example.lifemanager.ui.settings.displayDate
+import com.example.lifemanager.ui.settings.displayDateTime
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -305,7 +306,7 @@ private fun TodoEditorDialog(
                     supportingText = { Text("保存后会转换为独立标签记录") },
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(state.dueAt?.let(::formatDateTime) ?: "未设置截止日期", modifier = Modifier.weight(1f))
+                    Text(state.dueAt?.let { displayDateTime(it) } ?: "未设置截止日期", modifier = Modifier.weight(1f))
                     TextButton(onClick = { showDatePicker = true }) { Text("日期") }
                     TextButton(onClick = { showTimePicker = true }) { Text("时间") }
                     if (state.dueAt != null) TextButton(onClick = { onDueAtChanged(null) }) { Text("清除") }
@@ -367,8 +368,4 @@ private fun TodoPriority.label(): String = when (this) {
     TodoPriority.HIGH -> "高"
 }
 
-private fun formatDate(value: Instant): String =
-    DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneId.systemDefault()).format(value)
-
-private fun formatDateTime(value: Instant): String =
-    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault()).format(value)
+@Composable private fun formatDate(value: Instant): String = displayDate(value)

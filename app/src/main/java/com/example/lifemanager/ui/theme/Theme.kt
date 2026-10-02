@@ -9,17 +9,24 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+import com.example.lifemanager.domain.model.ThemeMode
 
 @Composable
 fun LifeManagerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: ThemeMode? = null,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    val useDarkTheme = when (themeMode) {
+        ThemeMode.DARK -> true
+        ThemeMode.LIGHT -> false
+        ThemeMode.SYSTEM, null -> darkTheme
+    }
     val colors = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && darkTheme -> dynamicDarkColorScheme(context)
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && useDarkTheme -> dynamicDarkColorScheme(context)
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> dynamicLightColorScheme(context)
-        darkTheme -> darkColorScheme()
+        useDarkTheme -> darkColorScheme()
         else -> lightColorScheme()
     }
     MaterialTheme(colorScheme = colors, content = content)

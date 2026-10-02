@@ -1,0 +1,95 @@
+# Phase 5 实施计划
+
+依据：已确认的 `../specs/2026-10-02-phase5-settings-backup-design.md`。先完成 Phase 5 验证、提交和远端核对，再开始卡通动感 UI。
+
+`writing-plans` 技能不可用；Buddy 的项目内跟踪脚本也未安装。本计划作为可持续恢复的任务记录，沿用现有 Gradle/TDD 验证，不为流程新增依赖、Linear 工单、PR 或不相关文档。
+
+## 必须成立的结果与连接
+
+- 设置持久化并真正影响展示及新建订阅：`SettingsScreen -> SettingsViewModel -> SettingsRepository -> Room`；根主题及日期展示订阅设置 Flow。
+- 备份包含十张业务表及设置：`BackupUseCase -> BackupRepository -> snapshot DAO / codec / file adapter`。
+- 保护备份成功且二次确认后才替换，数据库失败原数据不变：`SettingsViewModel -> maintenance session -> Room transaction`。
+- 旧草稿、异步操作和广播不能作用于恢复后的同 ID 数据：四模块、导航、Receiver、Worker 均接入本机世代和维护协调。
+- 设置关闭的提醒不会被重启或后台校准重新开启：提醒 Use Case、Scheduler 和投递前数据库校验均读取设置。
+- 完成报告包含可复现的验证、未完成和限制；不以存在文件或编译测试 APK 代替可运行验收。
+
+## 顺序与文件级任务
+
+1. **设置及非破坏性迁移**
+   - 先写 `data/local/SettingsMigrationTest`，验证新 schema、单行默认设置、十表旧数据及维护世代。
+   - 新增 `domain/model/AppSettings`、`domain/repository/SettingsRepository`、`data/local/entity/AppSettingsEntity`、`MaintenanceEntity`、`dao/SettingsDao`、`data/repository/SettingsRepositoryImpl`。
+   - 修改 `LifeManagerDatabase` 增加 v5 实体和 `4 -> 5` migration；修改 `AppModule` 绑定仓库；生成 v5 schema。
+   - 验证：针对迁移和仓库的 Robolectric 测试，及全量 JVM 回归。
+
+2. **设置页面和真实消费者**
+   - 先写设置 ViewModel 的读写失败、读取重试、快速重复提交和持久化测试；新建订阅默认偏好及保留已有设置的测试。
+   - 新增 `ui/settings/SettingsUiState`、`SettingsViewModel`、日期格式适配；修改设置页、根 Activity/主题/导航及四模块日期显示。
+   - 修改订阅新建编辑器读取默认币种和提醒组合；现有编辑器不被默认值覆盖，读取失败阻止静默保存。
+   - 不展示尚未接线的提醒开关、备份按钮或习惯提醒占位功能。
+   - 验证：设置和订阅 ViewModel、Compose 行为及 debug APK 构建。
+
+3. **版本化完整快照和 JSON 校验**
+   - 先写完整数据往返、历史记录保留、Long 精度、重复/孤儿/父子环、未知版本和大小限制测试。
+   - 新增 `domain/backup` 模型和验证器、`data/backup` DTO/codec、快照 DAO/仓库。
+   - 快照事务读取全部字段；不导出系统缓存、权限、本机世代或编辑草稿。
+   - 验证：codec 单元测试及真实 Room 十表完整往返。
+
+4. **维护会话和世代保护**
+   - 先写维护拒绝新操作、等待已有写入、取消不推进世代、旧结果失效、恢复后 ID 复用测试。
+   - 新增维护协调契约/实现，修改四模块写路径及 ViewModel、导航状态、BootReceiver/Worker/Receiver；统一锁顺序。
+   - 不持锁等待文件选择或人机确认；维护中广播快速结束，结束时重新校准。
+   - 验证：并发单元测试、现有通知草稿与 CRUD 回归。
+
+5. **文件、恢复和清空闭环**
+   - 先写来源校验、保护备份失败、相同 URI 拒绝、二次确认取消、插入失败回滚、进程重启边界及提醒失败分离测试。
+   - 新增 Android 文件流适配、导出/预览/恢复/清空 Use Case，接入设置 ViewModel 和系统文件选择器。
+   - 实现单事务完整替换及业务清空；恢复设置但不恢复本机世代，清空保留设置。
+   - 显示真实进度、明文隐私警告和可理解的错误；成功备份保留在用户选择的文件，不进 Git。
+   - 验证：Room 事务测试、Use Case/Compose 测试、模拟器文件选择器关键交互。
+
+6. **提醒偏好和恢复校准**
+   - 先写开关关闭/开启、Receiver 投递前设置和世代检查、后台/重启不绕过开关测试。
+   - 修改三类 Scheduler、Receiver、BootReceiver、Worker 和通知帮助类；日程补足恢复所需校验和权限撤销兜底。
+   - 只有真实接线后才展示三类开关。习惯提醒依然明确未实现。
+   - 验证：通知回归、权限被拒/被撤销及恢复后提醒重建设备验收。
+
+7. **深色、无障碍、性能和关于**
+   - 基于界面测试/测量定位问题，调整各页面语义、对比度、点击区域、滚动和必要的重复计算。
+   - 关于信息读取真实 BuildConfig 并核实项目和依赖许可证，不编造开源声明。
+   - 记录启动及页面性能、APK 体积；模拟器结果注明不能替代真机发布测量。
+   - 验证：大字体/深浅色 Compose 和设备检查、lint、实际测量。
+
+8. **最终验收与交付**
+   - 更新 README、`docs/phase5-acceptance.md`、schema README；核对原需求及已确认范围。
+   - 执行 JVM 测试、debug APK、测试 APK、lint、可用设备仪器测试；审查未接线代码和个人数据。
+   - 仅提交实际修改文件；Phase 5 完成后推送并核对远端提交。未能推送时先解决交付阻碍，不抢先开始 UI。
+
+## 命令
+
+PowerShell：`JAVA_HOME=D:\jdk`；使用项目现有 `.tools/gradle-9.4.1/bin/gradle.bat`。
+
+```powershell
+$env:JAVA_HOME='D:\jdk'
+.\.tools\gradle-9.4.1\bin\gradle.bat --no-daemon :app:testDebugUnitTest --rerun
+.\.tools\gradle-9.4.1\bin\gradle.bat --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug
+.\.tools\gradle-9.4.1\bin\gradle.bat --no-daemon :app:connectedDebugAndroidTest
+git diff --check
+```
+
+## 风险及撤回策略
+
+- 数据量/文件提供方失败：64 MiB、100,000 行限制，输出后重新读取校验；失败拒绝恢复。
+- 并发与系统广播：本机世代持久化、统一锁顺序、维护失败后重新校准；不在广播生命周期内等待用户确认。
+- 数据写入与闹钟非原子：分别呈现结果，数据成功不因闹钟失败被假称为失败或回滚。
+- 旧版本升级：显式迁移、迁移测试，不能删除真实数据库解决问题。
+- 开发撤回只处理本阶段源码提交并保留用户改动；上线后不自动降级 v5 数据库、不破坏性迁移。用户数据恢复只能通过已验证的保护备份和明确确认。
+
+## 当前进度
+
+- 设计：已确认。
+- 基线：205 个 JVM 测试实际重跑通过（26 套件，0 失败/错误）。
+- 任务 1：v5 设置与维护元数据表、显式迁移、仓库已实现；十张业务表保持不变。设置读写和关闭/重开持久化已有回归，设备迁移链正在验证。Worker 首次建库初始化仍是后续世代接入前的待办。
+- 任务 2：根主题、四模块日期展示、默认币种/订阅提醒组合及新建订阅消费者已接线。单个提醒天数在事务内增删，避免延迟观察覆盖已有组合；失败读取错误独立保留。
+- 设备验证揭示的旧问题：序列化库运行时版本混用、ActivityScenario 测试 Intent 标识/flags、冷启动通知导航早于导航图初始化。已定向修正并补测；247 项 JVM、22 项设备测试、debug/test APK 和 lint 实际执行通过（lint 0 error / 45 warning）。
+- 任务 2 本批验证通过；完整结果见 `../../phase5-acceptance.md`。接下来按任务 3 实现完整 JSON 快照与校验，不先暴露备份或清空按钮。
+- 任务 3–8：尚未完成。Phase 5 未完整验收，未作为完成阶段推送，卡通 UI 未开始。

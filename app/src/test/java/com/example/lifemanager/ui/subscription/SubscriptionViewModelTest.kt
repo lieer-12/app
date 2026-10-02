@@ -3,6 +3,7 @@ package com.example.lifemanager.ui.subscription
 import androidx.lifecycle.viewModelScope
 import com.example.lifemanager.domain.model.*
 import com.example.lifemanager.domain.repository.SubscriptionRepository
+import com.example.lifemanager.domain.repository.SettingsRepository
 import com.example.lifemanager.notification.SubscriptionReminderSchedulerContract
 import java.time.Instant
 import java.time.LocalDate
@@ -13,8 +14,83 @@ import kotlin.test.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SubscriptionViewModelTest {
+    @Test fun newSubscriptionUsesSavedCurrencyAndReminderCombination() {
+        val preferences = Preferences(AppSettings(defaultCurrency = "EUR", defaultReminderDays = setOf(1, 7)))
+        scenario(preferences = preferences) { model, repository, _ ->
+            model.openEditor()
+            advanceUntilIdle()
+            assertEquals("EUR", model.uiState.value.editor.currency)
+            assertEquals(setOf(1, 7), model.uiState.value.editor.reminderDays)
+            model.updateEditor { it.copy(name = "新订阅", amount = "12.50") }
+            model.saveSubscription()
+            advanceUntilIdle()
+            assertEquals("EUR", repository.subscriptions.value.single().currency)
+            assertEquals(1250L, repository.subscriptions.value.single().amountMinor)
+        }
+    }
+
+    @Test fun editingExistingSubscriptionIgnoresChangedDefaults() {
+        val preferences = Preferences(AppSettings(defaultCurrency = "EUR", defaultReminderDays = setOf(1, 7)))
+        scenario(preferences = preferences) { model, repository, _ ->
+            repository.seed()
+            advanceUntilIdle()
+            model.openEditor(repository.subscriptions.value.single())
+            advanceUntilIdle()
+            assertEquals("CNY", model.uiState.value.editor.currency)
+            assertEquals(setOf(3), model.uiState.value.editor.reminderDays)
+        }
+    }
+
+    @Test fun unreadDefaultsDisableSavingAndPreserveTheNewSubscriptionDraft() {
+        val preferences = Preferences().apply { read = { error("读取偏好失败") } }
+        scenario(preferences = preferences) { model, repository, _ ->
+            model.openEditor()
+            model.updateEditor { it.copy(name = "保留草稿", amount = "12.50") }
+            advanceUntilIdle()
+            model.saveSubscription()
+            advanceUntilIdle()
+            assertTrue(repository.subscriptions.value.isEmpty())
+            assertEquals("保留草稿", model.uiState.value.editor.name)
+            assertFalse(model.uiState.value.editor.isLoadingReminders)
+            assertNotNull(model.uiState.value.editor.preferencesError)
+        }
+    }
+
+    @Test fun editingAfterAReadFailureKeepsTheRecoveryMessageAndDoesNotWrite() {
+        val preferences = Preferences().apply { read = { error("读取偏好失败") } }
+        scenario(preferences = preferences) { model, repository, _ ->
+            model.openEditor()
+            advanceUntilIdle()
+            model.updateEditor { it.copy(name = "失败后继续输入", amount = "12.50") }
+            model.saveSubscription()
+            advanceUntilIdle()
+            assertTrue(repository.subscriptions.value.isEmpty())
+            assertFalse(model.uiState.value.editor.isLoadingReminders)
+            assertNotNull(model.uiState.value.editor.preferencesError)
+        }
+    }
+
+    @Test fun lateDefaultsCannotOverrideAnotherEditorSession() {
+        val gate = CompletableDeferred<AppSettings>()
+        val preferences = Preferences().apply { read = { gate.await() } }
+        scenario(preferences = preferences) { model, repository, _ ->
+            repository.seed()
+            advanceUntilIdle()
+            model.openEditor()
+            runCurrent()
+            model.closeEditor()
+            model.openEditor(repository.subscriptions.value.single())
+            advanceUntilIdle()
+            gate.complete(AppSettings(defaultCurrency = "EUR", defaultReminderDays = setOf(7)))
+            advanceUntilIdle()
+            assertEquals(1L, model.uiState.value.editor.original!!.id)
+            assertEquals("CNY", model.uiState.value.editor.currency)
+            assertEquals(setOf(3), model.uiState.value.editor.reminderDays)
+        }
+    }
     @Test fun savingConvertsMajorUnitsAndReconcilesSelectedReminderDays() = scenario { model, repository, scheduler ->
         model.openEditor()
+        advanceUntilIdle()
         model.updateEditor { it.copy(name = "音乐", amount = "15.00", reminderDays = setOf(1, 3, 7)) }
         model.saveSubscription()
         advanceUntilIdle()
@@ -37,6 +113,7 @@ class SubscriptionViewModelTest {
     }
     @Test fun invalidAndFailedSavesKeepEditorOpenWithoutLosingInputs() = scenario { model, repository, _ ->
         model.openEditor()
+        advanceUntilIdle()
         model.updateEditor { it.copy(name = "", amount = "15.00") }
         model.saveSubscription()
         advanceUntilIdle()
@@ -98,6 +175,7 @@ class SubscriptionViewModelTest {
         runCurrent()
         model.closeEditor()
         model.openEditor()
+        advanceUntilIdle()
         model.updateEditor { it.copy(name = "新表单", reminderDays = setOf(7)) }
         result.completeExceptionally(IllegalStateException("old read failed"))
         advanceUntilIdle()
@@ -191,6 +269,7 @@ class SubscriptionViewModelTest {
         advanceUntilIdle()
         repository.failWrites = true
         model.openEditor()
+        advanceUntilIdle()
         model.updateEditor { it.copy(name = "未保存", amount = "20.00") }
         model.saveSubscription()
         advanceUntilIdle()
@@ -260,6 +339,7 @@ class SubscriptionViewModelTest {
         advanceUntilIdle()
         model.openDetail(1)
         model.openEditor()
+        advanceUntilIdle()
         model.updateEditor { it.copy(amount = "23.45", note = "保留备注") }
         model.openNotificationDetail(2)
         model.saveSubscription()
@@ -362,6 +442,7 @@ class SubscriptionViewModelTest {
 
     private fun scenario(
         configure: FakeRepository.() -> Unit = {},
+        preferences: Preferences = Preferences(),
         block: suspend TestScope.(SubscriptionViewModel, FakeRepository, RecordingScheduler) -> Unit,
     ) = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
@@ -369,7 +450,7 @@ class SubscriptionViewModelTest {
         val repository = FakeRepository()
         repository.configure()
         val scheduler = RecordingScheduler()
-        val model = SubscriptionViewModel(repository, scheduler, dispatcher)
+        val model = SubscriptionViewModel(repository, scheduler, preferences, dispatcher)
         try { advanceUntilIdle(); block(model, repository, scheduler) }
         finally { model.viewModelScope.cancel(); advanceUntilIdle(); Dispatchers.resetMain() }
     }
@@ -380,6 +461,13 @@ class SubscriptionViewModelTest {
         override fun schedule(subscription: Subscription, reminderDays: Set<Int>) { days = if (subscription.isActive) reminderDays else emptySet() }
         override fun cancel(subscriptionId: Long, reminderDays: Set<Int>) { cancelled += subscriptionId; days = emptySet() }
         override fun cancelAll(subscriptionId: Long) { cancelled += subscriptionId; days = emptySet() }
+    }
+    private class Preferences(initial: AppSettings = AppSettings()) : SettingsRepository {
+        private val values = MutableStateFlow(initial)
+        var read: (suspend () -> AppSettings)? = null
+        override fun observeSettings() = values
+        override suspend fun getSettings() = read?.invoke() ?: values.value
+        override suspend fun updateSettings(transform: (AppSettings) -> AppSettings) { values.value = transform(values.value) }
     }
     private class FakeRepository : SubscriptionRepository {
         val subscriptions = MutableStateFlow<List<Subscription>>(emptyList())

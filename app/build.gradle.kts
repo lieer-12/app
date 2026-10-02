@@ -75,6 +75,9 @@ kotlin {
 }
 
 dependencies {
+    // Room's migration test reader needs 1.8.1; align the app's Navigation-provided
+    // core runtime too, because Android tests reuse dependencies from the app APK.
+    implementation(platform(libs.kotlinx.serialization.bom))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)

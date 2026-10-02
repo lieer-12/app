@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.dp
 import com.example.lifemanager.domain.model.BillingCycle
 import com.example.lifemanager.domain.usecase.SubscriptionRules
 import java.time.LocalDate
+import com.example.lifemanager.ui.settings.displayDate
 
 @Composable
 internal fun SubscriptionEditor(editor: SubscriptionEditorState, model: SubscriptionViewModel, pendingNotificationLabel: String? = null) {
@@ -26,7 +27,7 @@ internal fun SubscriptionEditor(editor: SubscriptionEditorState, model: Subscrip
                 } }
                 item { EditField("订阅名称", editor.name, !editor.isSaving) { value -> model.updateEditor { it.copy(name = value) } } }
                 item { EditField("金额", editor.amount, !editor.isSaving) { value -> model.updateEditor { it.copy(amount = value) } } }
-                item { EditField("币种（ISO 4217，例如 CNY）", editor.currency, !editor.isSaving) { value -> model.updateEditor { it.copy(currency = value) } } }
+                item { EditField("币种（ISO 4217，例如 CNY）", editor.currency, !editor.isSaving && !editor.isLoadingReminders && editor.preferencesError == null) { value -> model.updateEditor { it.copy(currency = value) } } }
                 item { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     BillingCycle.entries.forEach { cycle -> FilterChip(editor.billingCycle == cycle,
                         onClick = { model.updateEditor { it.copy(billingCycle = cycle) } }, label = { Text(cycleLabel(cycle)) }, enabled = !editor.isSaving) }
@@ -39,14 +40,15 @@ internal fun SubscriptionEditor(editor: SubscriptionEditorState, model: Subscrip
                 item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(1, 3, 7).forEach { day -> FilterChip(day in editor.reminderDays, onClick = {
                         model.updateEditor { it.copy(reminderDays = if (day in it.reminderDays) it.reminderDays - day else it.reminderDays + day) }
-                    }, label = { Text("$day 天") }, enabled = !editor.isSaving && !editor.isLoadingReminders) }
+                    }, label = { Text("$day 天") }, enabled = !editor.isSaving && !editor.isLoadingReminders && editor.preferencesError == null) }
                 } }
-                if (editor.isLoadingReminders) item { Text("正在读取提醒配置…") }
+                if (editor.isLoadingReminders) item { Text(if (editor.original == null) "正在读取新建订阅偏好…" else "正在读取提醒配置…") }
+                editor.preferencesError?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
                 if (editor.original?.isActive == false) item { Text("此订阅已取消；保存编辑后仍保持取消状态。") }
                 editor.validationMessage?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
             }
         },
-        confirmButton = { TextButton(onClick = model::saveSubscription, enabled = !editor.isSaving && !editor.isLoadingReminders) { Text("保存订阅") } },
+        confirmButton = { TextButton(onClick = model::saveSubscription, enabled = !editor.isSaving && !editor.isLoadingReminders && editor.preferencesError == null) { Text("保存订阅") } },
         dismissButton = { TextButton(onClick = model::closeEditor, enabled = !editor.isSaving) { Text("取消") } },
     )
 }
@@ -97,11 +99,11 @@ internal fun SubscriptionDetail(state: SubscriptionUiState, model: SubscriptionV
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             state.errorMessage?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
             item { Text("${moneyText(subscription.amountMinor, subscription.currency)} / ${cycleLabel(subscription.billingCycle)}") }
-            item { Text("开始：${subscription.startDate}") }
-            item { Text("下次扣费：${SubscriptionRules.effectiveNextBillingDate(subscription, LocalDate.now()) ?: "已停止"}") }
+            item { Text("开始：${displayDate(subscription.startDate)}") }
+            item { Text("下次扣费：${SubscriptionRules.effectiveNextBillingDate(subscription, LocalDate.now())?.let { displayDate(it) } ?: "已停止"}") }
             item { Text("${subscription.category ?: "未分类"}　${subscription.note.orEmpty()}") }
             item { Text("提醒：${state.detailReminderDays.sorted().joinToString { "提前 $it 天" }.ifEmpty { "未设置" }}") }
-            subscription.cancelDate?.let { item { Text("取消日期：$it") } }
+            subscription.cancelDate?.let { day -> item { Text("取消日期：${displayDate(day)}") } }
             item { Row(Modifier.horizontalScroll(rememberScrollState())) {
                 TextButton(onClick = { model.openEditor(subscription) }, enabled = !state.isBusy) { Text("编辑") }
                 TextButton(onClick = { confirm = if (subscription.isActive) "cancel" else "restore" }, enabled = !state.isBusy) { Text(if (subscription.isActive) "取消订阅" else "恢复订阅") }
@@ -112,7 +114,7 @@ internal fun SubscriptionDetail(state: SubscriptionUiState, model: SubscriptionV
             val payments = state.payments.filter { it.subscriptionId == subscription.id }.sortedWith(compareByDescending<com.example.lifemanager.domain.model.SubscriptionPayment> { it.paidAt }.thenByDescending { it.id })
             if (payments.isEmpty()) item { Text("还没有手工扣费记录") }
             payments.forEach { payment -> item {
-                Text("${payment.paidAt}　${moneyText(payment.amountMinor, payment.currency)}")
+                Text("${displayDate(payment.paidAt)}　${moneyText(payment.amountMinor, payment.currency)}")
                 payment.note?.let { Text(it) }
                 Row {
                     TextButton(onClick = { model.openPaymentEditor(subscription.id, payment) }, enabled = !state.isBusy) { Text("编辑扣费") }

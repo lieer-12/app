@@ -19,6 +19,7 @@ data class SubscriptionEditorState(
     val note: String = "",
     val reminderDays: Set<Int> = emptySet(),
     val isLoadingReminders: Boolean = false,
+    val preferencesError: String? = null,
     val isSaving: Boolean = false,
     val validationMessage: String? = null,
 )

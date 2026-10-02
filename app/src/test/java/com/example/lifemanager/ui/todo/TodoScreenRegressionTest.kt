@@ -2,12 +2,15 @@ package com.example.lifemanager.ui.todo
 
 import android.app.Application
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import com.example.lifemanager.ui.settings.LocalDateFormat
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -22,6 +25,7 @@ import com.example.lifemanager.ui.schedule.ScheduleViewModel
 import com.example.lifemanager.ui.theme.LifeManagerTheme
 import com.example.lifemanager.ui.navigation.NavGraph
 import com.example.lifemanager.ui.navigation.TodoNavigationRequest
+import com.example.lifemanager.ui.settings.TestSettingsOwner
 import java.time.Instant
 import java.util.TimeZone
 import kotlinx.coroutines.Dispatchers
@@ -43,10 +47,11 @@ class TodoScreenRegressionTest {
     @get:Rule val compose = createComposeRule()
     private lateinit var model: TodoViewModel
     private var scheduleModel: ScheduleViewModel? = null
+    private var settingsOwner: TestSettingsOwner? = null
     private val oldZone = TimeZone.getDefault()
     private val requestId = mutableStateOf<Long?>(null)
 
-    @After fun cleanup() { if (::model.isInitialized) model.viewModelScope.cancel(); scheduleModel?.viewModelScope?.cancel(); TimeZone.setDefault(oldZone) }
+    @After fun cleanup() { if (::model.isInitialized) model.viewModelScope.cancel(); scheduleModel?.viewModelScope?.cancel(); settingsOwner?.close(); TimeZone.setDefault(oldZone) }
 
     @Test fun notificationOpensTargetHiddenBySearch() {
         model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "通知目标"))), NoAlarms, Dispatchers.IO)
@@ -85,6 +90,18 @@ class TodoScreenRegressionTest {
         assertEquals(dueAt, model.uiState.value.editor.dueAt)
     }
 
+    @Test fun todoDeadlineDisplayUsesPreferenceWithoutChangingItsInstant() {
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"))
+        val due = Instant.parse("2026-10-01T23:30:00Z")
+        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "日期展示", dueAt = due))), NoAlarms, Dispatchers.IO)
+        model.openEditor(Todo(id = 42, title = "日期展示", dueAt = due))
+        compose.setContent { LifeManagerTheme { CompositionLocalProvider(LocalDateFormat provides DateFormat.DMY) {
+            TodoScreen(viewModel = model, onOpenSettings = {})
+        } } }
+        compose.onNodeWithText("02-10-2026 07:30").assertExists()
+        assertEquals(due, model.uiState.value.editor.dueAt)
+    }
+
     private fun show() { compose.setContent { LifeManagerTheme {
         TodoScreen(initialTodoId = requestId.value, onOpenSettings = {}, viewModel = model)
     } }; compose.waitForIdle() }
@@ -94,7 +111,8 @@ class TodoScreenRegressionTest {
         val request = mutableStateOf<TodoNavigationRequest?>(null)
         val schedules = ScheduleViewModel(EmptySchedules(), NoScheduleAlarms, Dispatchers.IO)
         scheduleModel = schedules
-        compose.setContent { LifeManagerTheme { NavGraph(todoViewModel = model, scheduleViewModel = schedules, todoRequest = request.value,
+        val settings = TestSettingsOwner().also { settingsOwner = it }
+        compose.setContent { LifeManagerTheme { NavGraph(todoViewModel = model, scheduleViewModel = schedules, settingsViewModel = settings.model, todoRequest = request.value,
             onTodoConsumed = { token -> if (request.value?.token == token) request.value = null }) } }
         compose.waitForIdle()
         compose.onNode(hasText("设置") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))
@@ -105,6 +123,21 @@ class TodoScreenRegressionTest {
         compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.editor.pendingNotificationId == 42L }
         assertEquals("跨模块保留的草稿", model.uiState.value.editor.title)
         compose.onNodeWithText("跨模块保留的草稿").assertExists()
+    }
+
+    @Test fun coldStartWithNotificationWaitsForTheGraphThenOpensTheTarget() {
+        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "冷启动目标"))), NoAlarms, Dispatchers.IO)
+        val schedules = ScheduleViewModel(EmptySchedules(), NoScheduleAlarms, Dispatchers.IO)
+        scheduleModel = schedules
+        val settings = TestSettingsOwner().also { settingsOwner = it }
+        var consumed = false
+        compose.setContent { LifeManagerTheme {
+            NavGraph(todoViewModel = model, scheduleViewModel = schedules, settingsViewModel = settings.model,
+                todoRequest = TodoNavigationRequest(1, 42), onTodoConsumed = { consumed = true })
+        } }
+        compose.waitUntil(5000) { model.uiState.value.editor.editingId == 42L }
+        compose.onNode(hasText("冷启动目标") and hasSetTextAction()).assertExists()
+        assertTrue(consumed)
     }
 
     private object NoAlarms : ReminderSchedulerContract {

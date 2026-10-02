@@ -60,8 +60,9 @@ class TodoNotificationActivityTest {
     private fun sendNotification(extra: String) {
         compose.runOnIdle {
             val activity = compose.activity
-            activity.startActivity(Intent(activity, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            // ActivityScenario matches lifecycle callbacks by launch-intent identity.
+            activity.startActivity(Intent(activity.intent)
+                .setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 .putExtra(extra, Long.MAX_VALUE))
         }
         compose.waitForIdle()

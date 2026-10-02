@@ -2,6 +2,8 @@ package com.example.lifemanager.ui.schedule
 
 import android.app.Application
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import com.example.lifemanager.ui.settings.LocalDateFormat
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.*
 import androidx.compose.ui.semantics.*
@@ -13,6 +15,7 @@ import com.example.lifemanager.notification.ScheduleReminderSchedulerContract
 import com.example.lifemanager.notification.ReminderSchedulerContract
 import com.example.lifemanager.ui.navigation.NavGraph
 import com.example.lifemanager.ui.navigation.ScheduleNavigationRequest
+import com.example.lifemanager.ui.settings.TestSettingsOwner
 import com.example.lifemanager.ui.todo.TodoViewModel
 import com.example.lifemanager.ui.theme.LifeManagerTheme
 import java.time.Instant
@@ -34,7 +37,8 @@ class ScheduleScreenRegressionTest {
     @get:Rule val compose = createComposeRule()
     private lateinit var model: ScheduleViewModel
     private var todoModel: TodoViewModel? = null
-    @After fun cleanup() { if (::model.isInitialized) model.viewModelScope.cancel(); todoModel?.viewModelScope?.cancel() }
+    private var settingsOwner: TestSettingsOwner? = null
+    @After fun cleanup() { if (::model.isInitialized) model.viewModelScope.cancel(); todoModel?.viewModelScope?.cancel(); settingsOwner?.close() }
     @Test fun notificationPreservesDraftBeforeOpeningTarget() {
         model = ScheduleViewModel(Records(), NoAlarms, Dispatchers.IO)
         val request = mutableStateOf<Long?>(null)
@@ -52,7 +56,8 @@ class ScheduleScreenRegressionTest {
         val todos = TodoViewModel(EmptyTodos(), NoTodoAlarms, Dispatchers.IO)
         todoModel = todos
         val request = mutableStateOf<ScheduleNavigationRequest?>(null)
-        compose.setContent { LifeManagerTheme { NavGraph(todoViewModel = todos, scheduleViewModel = model,
+        val settings = TestSettingsOwner().also { settingsOwner = it }
+        compose.setContent { LifeManagerTheme { NavGraph(todoViewModel = todos, scheduleViewModel = model, settingsViewModel = settings.model,
             scheduleRequest = request.value, onScheduleConsumed = { token ->
                 if (request.value?.token == token) request.value = null
             }) } }
@@ -86,6 +91,19 @@ class ScheduleScreenRegressionTest {
             compose.onNodeWithText("每天").assertIsNotEnabled()
             compose.onNodeWithText("已选").assertIsNotEnabled()
         } finally { gate.complete(Unit) }
+    }
+
+    @Test fun allDayEditorUsesSelectedDisplayFormatWithoutChangingCalendarDates() {
+        model = ScheduleViewModel(Records(), NoAlarms, Dispatchers.IO)
+        model.openEditor()
+        model.onAllDayChanged(true)
+        val day = java.time.LocalDate.of(2026, 10, 2)
+        model.onAllDayDatesChanged(day, day)
+        compose.setContent { LifeManagerTheme { CompositionLocalProvider(LocalDateFormat provides DateFormat.DMY) {
+            ScheduleScreen(viewModel = model)
+        } } }
+        compose.onNodeWithText("开始日期：02-10-2026").assertExists()
+        assertEquals(day, model.uiState.value.editor.allDayStartDate)
     }
     private object NoTodoAlarms : ReminderSchedulerContract {
         override fun schedule(todoId: Long, title: String, dueAt: Instant) = Unit
