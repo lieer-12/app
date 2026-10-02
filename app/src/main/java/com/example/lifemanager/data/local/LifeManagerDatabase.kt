@@ -23,6 +23,7 @@ import com.example.lifemanager.data.local.entity.SubscriptionReminderEntity
 import com.example.lifemanager.data.local.entity.AppSettingsEntity
 import com.example.lifemanager.data.local.entity.MaintenanceEntity
 import com.example.lifemanager.data.local.dao.SettingsDao
+import com.example.lifemanager.data.local.dao.BackupSnapshotDao
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
@@ -52,6 +53,7 @@ abstract class LifeManagerDatabase : RoomDatabase() {
     abstract fun habitDao(): HabitDao
     abstract fun subscriptionDao(): SubscriptionDao
     abstract fun settingsDao(): SettingsDao
+    abstract fun backupSnapshotDao(): BackupSnapshotDao
 
     companion object {
         val INITIALIZE = object : Callback() {

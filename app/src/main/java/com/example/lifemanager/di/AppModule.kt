@@ -10,6 +10,10 @@ import com.example.lifemanager.domain.repository.SubscriptionRepository
 import com.example.lifemanager.data.repository.SubscriptionRepositoryImpl
 import com.example.lifemanager.data.repository.SettingsRepositoryImpl
 import com.example.lifemanager.domain.repository.SettingsRepository
+import com.example.lifemanager.data.backup.BackupRepositoryImpl
+import com.example.lifemanager.domain.backup.BackupRepository
+import com.example.lifemanager.domain.backup.BackupCodec
+import com.example.lifemanager.data.backup.BackupJsonCodec
 import com.example.lifemanager.notification.ReminderScheduler
 import com.example.lifemanager.notification.ReminderSchedulerContract
 import com.example.lifemanager.notification.ScheduleReminderScheduler
@@ -55,11 +59,19 @@ abstract class AppModule {
     @Singleton
     abstract fun bindSettingsRepository(impl: SettingsRepositoryImpl): SettingsRepository
 
+    @Binds
+    @Singleton
+    abstract fun bindBackupRepository(impl: BackupRepositoryImpl): BackupRepository
+
 }
 
 @Module
 @InstallIn(SingletonComponent::class)
 object ProviderModule {
+    @Provides
+    @Singleton
+    fun provideBackupCodec(): BackupCodec = BackupJsonCodec()
+
     @Provides
     @Singleton
     fun provideSubscriptionReminderScheduler(@ApplicationContext context: Context): SubscriptionReminderSchedulerContract =
