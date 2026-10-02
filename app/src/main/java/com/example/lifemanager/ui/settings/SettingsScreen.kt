@@ -44,11 +44,11 @@ fun SettingsScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text("已完成模块", style = MaterialTheme.typography.titleLarge)
-            Text("当前已启用待办、日程和打卡。订阅、打卡提醒、暂停和归档将在后续 Phase 评审后再加入。")
+            Text("当前已启用待办、日程、打卡和订阅费用管理。打卡提醒、暂停和归档尚未实现。")
             Text(if (notificationGranted) "通知权限：已允许" else "通知权限：未允许")
             if (Build.VERSION.SDK_INT >= 33 && !notificationGranted) {
                 Button(onClick = { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }) {
-                    Text("允许待办提醒")
+                    Text("允许本地提醒")
                 }
             }
             Text(if (exactAlarmGranted) "精确提醒：已允许" else "精确提醒：未允许，将使用系统兜底调度")

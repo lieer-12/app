@@ -10,8 +10,16 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
 
 class SubscriptionRulesTest {
+    @Test fun `totals reject overflow instead of displaying negative expenses`() {
+        val first = subscription(amountMinor = Long.MAX_VALUE)
+        val second = subscription(amountMinor = 1).copy(id = 8)
+        assertFailsWith<ArithmeticException> {
+            SubscriptionRules.calculateStats(listOf(first, second), emptyList(), LocalDate.of(2026, 8, 23))
+        }
+    }
     @Test
     fun `monthly next billing restores anchor day after February`() {
         val subscription = subscription(

@@ -12,6 +12,8 @@ import com.example.lifemanager.notification.ReminderScheduler
 import com.example.lifemanager.notification.ReminderSchedulerContract
 import com.example.lifemanager.notification.ScheduleReminderScheduler
 import com.example.lifemanager.notification.ScheduleReminderSchedulerContract
+import com.example.lifemanager.notification.SubscriptionReminderScheduler
+import com.example.lifemanager.notification.SubscriptionReminderSchedulerContract
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -52,6 +54,11 @@ abstract class AppModule {
 @Module
 @InstallIn(SingletonComponent::class)
 object ProviderModule {
+    @Provides
+    @Singleton
+    fun provideSubscriptionReminderScheduler(@ApplicationContext context: Context): SubscriptionReminderSchedulerContract =
+        SubscriptionReminderScheduler(context)
+
     @Provides
     @Singleton
     fun provideReminderScheduler(@ApplicationContext context: Context): ReminderSchedulerContract =

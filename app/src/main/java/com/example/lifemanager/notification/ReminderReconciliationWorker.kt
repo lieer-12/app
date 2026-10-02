@@ -9,6 +9,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.example.lifemanager.data.local.LifeManagerDatabase
 import com.example.lifemanager.data.repository.toDomain
+import com.example.lifemanager.domain.usecase.SubscriptionOperationCoordinator
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 
@@ -25,12 +26,19 @@ class ReminderReconciliationWorker(
         return try {
             val scheduler = ReminderScheduler(applicationContext)
             val scheduleScheduler = ScheduleReminderScheduler(applicationContext)
+            val subscriptionScheduler = SubscriptionReminderScheduler(applicationContext)
             database.todoDao().getAll()
                 .filter { !it.isCompleted && it.dueAt != null }
                 .forEach { todo ->
                     scheduler.schedule(todo.id, todo.title, Instant.ofEpochMilli(todo.dueAt ?: 0L))
                 }
             database.scheduleDao().getAll().forEach { scheduleScheduler.schedule(it.toDomain()) }
+            SubscriptionOperationCoordinator.run {
+                val subscriptionDao = database.subscriptionDao()
+                subscriptionDao.getAll().forEach { subscription ->
+                    subscriptionScheduler.schedule(subscription.toDomain(), subscriptionDao.getReminderDays(subscription.id).toSet())
+                }
+            }
             Result.success()
         } catch (_: Exception) {
             Result.retry()

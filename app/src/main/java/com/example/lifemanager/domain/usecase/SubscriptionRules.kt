@@ -72,10 +72,10 @@ object SubscriptionRules {
         val cnySubscriptions = subscriptions.filter { it.currency == CNY }
         val cnyPayments = payments.filter { it.currency == CNY }
         val monthStats = months.map { month ->
-            val forecast = cnySubscriptions.sumOf { subscription ->
-                forecastOccurrences(subscription, month.atDay(1), month.atEndOfMonth()).size * subscription.amountMinor
+            val forecast = cnySubscriptions.sumExact { subscription ->
+                Math.multiplyExact(forecastOccurrences(subscription, month.atDay(1), month.atEndOfMonth()).size.toLong(), subscription.amountMinor)
             }
-            val actual = cnyPayments.filter { YearMonth.from(it.paidAt) == month }.sumOf(SubscriptionPayment::amountMinor)
+            val actual = cnyPayments.filter { YearMonth.from(it.paidAt) == month }.sumExact(SubscriptionPayment::amountMinor)
             SubscriptionMonthStats(month, forecast, actual)
         }
         val currentMonth = monthStats.last()
@@ -83,14 +83,14 @@ object SubscriptionRules {
         val monthEnd = YearMonth.from(today).atEndOfMonth()
         val categoryStats = cnySubscriptions.groupBy { it.category?.ifBlank { null } ?: "未分类" }
             .map { (category, items) ->
-                SubscriptionCategoryStats(category, items.sumOf { subscription ->
-                    forecastOccurrences(subscription, monthStart, monthEnd).size * subscription.amountMinor
+                SubscriptionCategoryStats(category, items.sumExact { subscription ->
+                    Math.multiplyExact(forecastOccurrences(subscription, monthStart, monthEnd).size.toLong(), subscription.amountMinor)
                 })
             }.filter { it.amountMinor > 0 }.sortedByDescending(SubscriptionCategoryStats::amountMinor)
         val billingCycleStats = cnySubscriptions.groupBy(Subscription::billingCycle)
             .map { (cycle, items) ->
-                BillingCycleStats(cycle, items.sumOf { subscription ->
-                    forecastOccurrences(subscription, monthStart, monthEnd).size * subscription.amountMinor
+                BillingCycleStats(cycle, items.sumExact { subscription ->
+                    Math.multiplyExact(forecastOccurrences(subscription, monthStart, monthEnd).size.toLong(), subscription.amountMinor)
                 })
             }.filter { it.amountMinor > 0 }.sortedBy { it.billingCycle.ordinal }
         return SubscriptionStats(currentMonth, monthStats, categoryStats, billingCycleStats)
@@ -118,6 +118,9 @@ object SubscriptionRules {
     } catch (_: IllegalArgumentException) {
         null
     }
+
+    private inline fun <T> Iterable<T>.sumExact(amount: (T) -> Long): Long =
+        fold(0L) { total, item -> Math.addExact(total, amount(item)) }
 
     private fun LocalDate.cycleIndexOnOrAfter(target: LocalDate, cycle: BillingCycle): Long {
         // Use calendar buckets rather than clamped dates to seek directly, including before the anchor.
