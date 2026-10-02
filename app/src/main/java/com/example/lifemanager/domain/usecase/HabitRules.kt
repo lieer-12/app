@@ -98,7 +98,7 @@ object HabitRules {
     private fun longestExpectedDayStreak(habit: Habit, dates: Set<LocalDate>, latest: LocalDate): Int {
         var streak = 0
         var longest = 0
-        var date = expectedOnOrBefore(habit, habit.startDate) ?: return 0
+        var date = expectedOnOrAfter(habit, habit.startDate, latest) ?: return 0
         while (date <= latest) {
             if (date in dates) {
                 streak += 1
@@ -106,9 +106,20 @@ object HabitRules {
             } else {
                 streak = 0
             }
-            date = expectedOnOrBefore(habit, date.plusDays(1)) ?: break
+            if (date == latest) break
+            date = expectedOnOrAfter(habit, date.plusDays(1), latest) ?: break
         }
         return longest
+    }
+
+    private fun expectedOnOrAfter(habit: Habit, date: LocalDate, lastDate: LocalDate): LocalDate? {
+        var candidate = maxOf(date, habit.startDate)
+        while (candidate <= lastDate) {
+            if (isExpectedOn(habit, candidate)) return candidate
+            if (candidate == lastDate) break
+            candidate = candidate.plusDays(1)
+        }
+        return null
     }
 
     private fun currentPeriodStreak(

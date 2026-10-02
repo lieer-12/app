@@ -2,6 +2,7 @@ package com.example.lifemanager.ui.habit
 
 import androidx.lifecycle.viewModelScope
 import com.example.lifemanager.domain.model.Habit
+import com.example.lifemanager.domain.model.HabitFrequencyType
 import com.example.lifemanager.domain.model.HabitRecord
 import com.example.lifemanager.domain.repository.HabitRepository
 import java.time.Instant
@@ -19,6 +20,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -70,9 +73,60 @@ class HabitViewModelTest {
         }
     }
 
-    private class FakeHabitRepository(habits: List<Habit> = emptyList()) : HabitRepository {
+    @Test
+    fun `today toggle rejects habit whose start date is in the future`() = runTest {
+        withModel(FakeHabitRepository(listOf(habit(1).copy(startDate = LocalDate.now().plusDays(2))))) { model ->
+            model.toggleToday(1)
+            advanceUntilIdle()
+            assertFalse(model.uiState.value.cards.single().completedToday)
+            assertNotNull(model.uiState.value.errorMessage)
+        }
+    }
+
+    @Test
+    fun `today toggle rejects an unselected weekday`() = runTest {
+        val otherDay = LocalDate.now().plusDays(1).dayOfWeek
+        val custom = habit(1).copy(frequencyType = HabitFrequencyType.CUSTOM, customDaysOfWeek = setOf(otherDay))
+        withModel(FakeHabitRepository(listOf(custom))) { model ->
+            model.toggleToday(1)
+            advanceUntilIdle()
+            assertFalse(model.uiState.value.cards.single().completedToday)
+            assertNotNull(model.uiState.value.errorMessage)
+        }
+    }
+
+    @Test
+    fun `existing pre start record remains visible and can be undone`() = runTest {
+        val futureHabit = habit(1).copy(startDate = LocalDate.now().plusDays(2))
+        val legacy = HabitRecord(habitId = 1, date = LocalDate.now(), createdAt = Instant.EPOCH)
+        withModel(FakeHabitRepository(listOf(futureHabit), listOf(legacy))) { model ->
+            assertTrue(model.uiState.value.cards.single().completedToday)
+            model.toggleToday(1)
+            advanceUntilIdle()
+            assertFalse(model.uiState.value.cards.single().completedToday)
+        }
+    }
+
+    private suspend fun kotlinx.coroutines.test.TestScope.withModel(
+        repository: HabitRepository,
+        body: suspend (HabitViewModel) -> Unit,
+    ) {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val model = HabitViewModel(repository, dispatcher)
+        try {
+            advanceUntilIdle()
+            body(model)
+        } finally {
+            model.viewModelScope.cancel()
+            advanceUntilIdle()
+            Dispatchers.resetMain()
+        }
+    }
+
+    private class FakeHabitRepository(habits: List<Habit> = emptyList(), records: List<HabitRecord> = emptyList()) : HabitRepository {
         private val habitState = MutableStateFlow(habits)
-        private val recordState = MutableStateFlow<List<HabitRecord>>(emptyList())
+        private val recordState = MutableStateFlow(records)
 
         override fun observeHabits(): Flow<List<Habit>> = habitState
 

@@ -29,6 +29,7 @@ data class HabitEditorState(
 data class HabitCard(
     val habit: Habit,
     val completedToday: Boolean,
+    val canToggleToday: Boolean,
     val currentStreak: Int,
     val progress: HabitPeriodProgress,
 )

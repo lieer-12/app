@@ -6,6 +6,8 @@ import com.example.lifemanager.domain.model.HabitRecord
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -160,6 +162,79 @@ class HabitRulesTest {
         val records = recordsOn(habit, "2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21")
 
         assertEquals(2, HabitRules.longestStreak(habit, records))
+    }
+
+    @Test
+    fun `custom longest streak advances between selected weekdays`() {
+        val habit = habit(
+            frequencyType = HabitFrequencyType.CUSTOM,
+            customDaysOfWeek = setOf(DayOfWeek.MONDAY),
+            startDate = LocalDate.of(2026, 9, 28),
+        )
+        assertEquals(2, boundedLongestStreak(habit, recordsOn(habit, "2026-09-28", "2026-10-05")))
+    }
+
+    @Test
+    fun `custom longest streak starts at first selected weekday after start date`() {
+        val habit = habit(
+            frequencyType = HabitFrequencyType.CUSTOM,
+            customDaysOfWeek = setOf(DayOfWeek.MONDAY),
+            startDate = LocalDate.of(2026, 9, 29),
+        )
+        assertEquals(1, boundedLongestStreak(habit, recordsOn(habit, "2026-10-05")))
+    }
+
+    @Test
+    fun `missing selected weekday breaks longest streak but other weekdays do not`() {
+        val habit = habit(
+            frequencyType = HabitFrequencyType.CUSTOM,
+            customDaysOfWeek = setOf(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY),
+            startDate = LocalDate.of(2026, 9, 28),
+        )
+        val records = recordsOn(habit, "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-07")
+        assertEquals(2, boundedLongestStreak(habit, records))
+    }
+
+    @Test
+    fun `unselected legacy record does not add to custom longest streak`() {
+        val habit = habit(
+            frequencyType = HabitFrequencyType.CUSTOM,
+            customDaysOfWeek = setOf(DayOfWeek.MONDAY),
+            startDate = LocalDate.of(2026, 9, 29),
+        )
+        assertEquals(0, boundedLongestStreak(habit, recordsOn(habit, "2026-09-30")))
+    }
+
+    @Test
+    fun `longest daily streak handles maximum supported date without overflow`() {
+        val habit = habit(startDate = LocalDate.MAX)
+        val record = HabitRecord(habitId = habit.id, date = LocalDate.MAX, createdAt = Instant.EPOCH)
+        assertEquals(1, boundedLongestStreak(habit, listOf(record)))
+    }
+
+    @Test
+    fun `custom forward search stops at unselected maximum date without overflow`() {
+        val start = LocalDate.MAX.minusDays(1)
+        val habit = habit(
+            frequencyType = HabitFrequencyType.CUSTOM,
+            customDaysOfWeek = setOf(start.dayOfWeek),
+            startDate = start,
+        )
+        val records = listOf(start, LocalDate.MAX).map {
+            HabitRecord(habitId = habit.id, date = it, createdAt = Instant.EPOCH)
+        }
+        assertEquals(1, boundedLongestStreak(habit, records))
+    }
+
+    // A broken progression must fail promptly, not hang the entire test worker.
+    private fun boundedLongestStreak(habit: Habit, records: List<HabitRecord>): Int {
+        val task = FutureTask { HabitRules.longestStreak(habit, records) }
+        Thread(task, "habit-streak-regression").apply { isDaemon = true }.start()
+        return try {
+            task.get(2, TimeUnit.SECONDS)
+        } finally {
+            task.cancel(true)
+        }
     }
 
     private fun habit(

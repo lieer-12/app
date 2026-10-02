@@ -1,6 +1,6 @@
 # 生活管理 Android App
 
-当前实现范围：Phase 1（待办事项核心闭环）、Phase 2（日程安排）、Phase 3（习惯打卡）和 Phase 4（订阅费用管理）。四个业务模块共享同一个 Room 数据库，底部导航另保留已有设置页。
+当前实现范围：Phase 1（待办事项核心闭环）、Phase 2（日程安排）、Phase 3（习惯打卡）和 Phase 4（订阅费用管理）。四个业务模块共享同一个 Room 数据库，底部导航另保留已有设置页。下述为已实现能力，不代表需求文档中的所有功能或设备验收均已完成。
 
 已包含的目标能力：
 
@@ -42,6 +42,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/check-phase4-structure
 
 请在 `local.properties` 配置本机 `sdk.dir`，并令 `JAVA_HOME` 指向 JDK 25。首次构建需要下载依赖；缓存齐全后可添加 `--offline`。旧 Phase 结构脚本是对应历史阶段的边界检查，当前代码使用 Phase 4 脚本。连接设备后可运行 `gradle :app:connectedDebugAndroidTest`；编译测试 APK 不等于设备测试已通过。
 
+习惯回归测试新增 Robolectric 4.17：在主机上执行真实 Room DAO/仓库和 Compose 交互，不替代真机测试。首次运行还需下载 Robolectric Android 28 测试运行时；它默认缓存于用户目录的 `.m2/repository`，与 Gradle 依赖缓存分开。只有两类缓存均齐全时才能完整离线测试，Gradle 的 `--offline` 本身不会阻止 Robolectric 首次下载运行时。Robolectric 与新增 Compose 测试依赖仅用于测试，不加入正式 APK。
+
 ## 权限与提醒行为
 
 - Android 13+ 需要用户授予通知权限；拒绝后仍可使用待办 CRUD。
@@ -60,6 +62,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/check-phase4-structure
 - Phase 4：订阅模块已实现；验证结果、已完成与待验收事项见 [Phase 4 验收记录](docs/phase4-acceptance.md)。
 - Phase 5：未开始。
 
+2026-10-02 第一批审计修复仅处理习惯数据完整性和打卡资格，见 [修复与回归验收记录](docs/2026-10-02-habit-integrity-fixes.md)。编辑习惯保留历史打卡；开始日期之前或未选星期不允许新增打卡，但已有错误记录仍可撤销。数据库版本保持 v4，无 schema 变更或破坏性迁移；旧版本已经误删的记录无法由本修复恢复。
+
 ## 当前已知限制
 
 - 尚未加入子任务、批量操作和手动拖拽排序，这些属于待办模块的后续完善项。
@@ -67,3 +71,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/check-phase4-structure
 - 仪器测试、设备提醒行为和打卡 UI 交互仍需在真机或模拟器验证。
 - 订阅的通知点击、权限切换、CSV 文件提供方行为和深浅色交互仍需设备验收；没有接入银行卡/支付自动扣费或汇率服务。
 - CSV 为消费数据明文文件，请选择可信保存位置，谨慎分享；不提供 CSV 导入或备份恢复。进程被系统终止时，进行中的导出不保证恢复。
+- 重新审计发现的待办/日程提醒失效、通知入口和保存一致性问题尚待后续修复；日程周/日视图尚非按小时的时间轴。完整待修清单见上述第一批报告，不能将本批通过等同于全部需求验收。
+- 习惯整体今日进度、周/月打卡率和庆祝动画，订阅年度/同比及逐订阅占比，以及设置、国际化、隐私保护和发布配置等仍不完整；Gradle Wrapper、发布签名、SDK 发布要求与性能/适配验收待完善。

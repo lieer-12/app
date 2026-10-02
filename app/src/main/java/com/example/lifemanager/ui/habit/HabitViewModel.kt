@@ -174,6 +174,12 @@ class HabitViewModel @Inject constructor(
     }
 
     fun toggleToday(habitId: Long) {
+        val card = uiState.value.cards.firstOrNull { it.habit.id == habitId }
+        if (card == null || !card.canToggleToday) {
+            errorMessage.value = "今天不能打卡：习惯不存在、尚未开始或不是指定打卡日"
+            return
+        }
+        errorMessage.value = null
         viewModelScope.launch(dispatcher) {
             try {
                 repository.toggleRecord(habitId, LocalDate.now())
@@ -198,9 +204,11 @@ class HabitViewModel @Inject constructor(
     ): HabitUiState {
         val today = LocalDate.now()
         val cards = habitList.map { habit ->
+            val completedToday = recordList.any { it.habitId == habit.id && it.date == today }
             HabitCard(
                 habit = habit,
-                completedToday = recordList.any { it.habitId == habit.id && it.date == today },
+                completedToday = completedToday,
+                canToggleToday = completedToday || HabitRules.isExpectedOn(habit, today),
                 currentStreak = HabitRules.currentStreak(habit, recordList, today),
                 progress = HabitRules.periodProgress(habit, recordList, today),
             )
@@ -247,7 +255,9 @@ class HabitViewModel @Inject constructor(
 
     private fun recordRange(habits: List<Habit>, month: YearMonth): Pair<LocalDate, LocalDate> {
         val today = LocalDate.now()
-        val start = habits.minOfOrNull(Habit::startDate) ?: today
+        // Changing a start date must not hide legacy entries from the month/heatmap or today's undo.
+        val heatmapStart = today.minusDays((52 * 7 + today.dayOfWeek.value - 1).toLong())
+        val start = minOf(habits.minOfOrNull(Habit::startDate) ?: today, month.atDay(1), heatmapStart)
         return start to maxOf(today, month.atEndOfMonth())
     }
 

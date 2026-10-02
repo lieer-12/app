@@ -32,4 +32,18 @@ class HabitDaoTest {
         database.habitDao().deleteHabit(habitId)
         assertEquals(0, database.habitDao().recordsBetween(day.toEpochDay(), day.toEpochDay()).first().size)
     }
+
+    @Test fun editingHabitPreservesHistoricalRecord() = runBlocking {
+        val day = LocalDate.of(2026, 9, 28)
+        val dao = database.habitDao()
+        val id = dao.upsert(HabitEntity(name = "阅读", iconKey = "Check", color = 0xFF00695C.toInt(),
+            frequencyType = HabitFrequencyType.DAILY, frequencyValue = 1, customDaysOfWeek = null,
+            startDate = day.toEpochDay(), note = null, createdAt = 1, updatedAt = 1))
+        dao.insertRecord(HabitRecordEntity(habitId = id, date = day.toEpochDay(), createdAt = 1))
+        val before = dao.recordsBetween(day.toEpochDay(), day.toEpochDay()).first()
+        val habit = dao.observeAll().first().single()
+        dao.upsert(habit.copy(name = "新的名称", updatedAt = 2))
+        assertEquals(before, dao.recordsBetween(day.toEpochDay(), day.toEpochDay()).first())
+        assertEquals("新的名称", dao.observeAll().first().single().name)
+    }
 }

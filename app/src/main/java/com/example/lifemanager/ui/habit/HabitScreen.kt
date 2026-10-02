@@ -193,6 +193,7 @@ private fun HabitTaskList(
                     }
                     Button(
                         onClick = { onToggleToday(card.habit.id) },
+                        enabled = card.canToggleToday,
                         modifier = Modifier.semantics {
                             contentDescription = if (card.completedToday) "撤销打卡：${card.habit.name}" else "打卡：${card.habit.name}"
                         },
