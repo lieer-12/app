@@ -8,12 +8,12 @@ import com.example.lifemanager.domain.repository.TodoRepository
 import com.example.lifemanager.domain.repository.ScheduleRepository
 import com.example.lifemanager.domain.repository.SubscriptionRepository
 import com.example.lifemanager.domain.usecase.SubscriptionOperationCoordinator
+import com.example.lifemanager.domain.usecase.TodoOperationCoordinator
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.time.Instant
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -29,9 +29,13 @@ class BootReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                repository.getAllTodos()
-                    .filter { !it.isCompleted && it.dueAt != null }
-                    .forEach { todo -> reminderScheduler.schedule(todo.id, todo.title, todo.dueAt ?: Instant.now()) }
+                TodoOperationCoordinator.run {
+                    repository.getAllTodos().forEach { todo ->
+                        val dueAt = todo.dueAt
+                        if (todo.isCompleted || dueAt == null) reminderScheduler.cancel(todo.id)
+                        else reminderScheduler.schedule(todo.id, todo.title, dueAt)
+                    }
+                }
                 scheduleRepository.getSchedules().forEach(scheduleReminderScheduler::schedule)
                 SubscriptionOperationCoordinator.run {
                     subscriptionRepository.getSubscriptions().forEach { subscription ->

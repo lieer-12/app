@@ -14,6 +14,7 @@ import com.example.lifemanager.di.IoDispatcher
 import com.example.lifemanager.notification.ReminderSchedulerContract
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -21,11 +22,19 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicLong
+import com.example.lifemanager.domain.usecase.TodoOperationCoordinator
 import javax.inject.Inject
 
 @HiltViewModel
+@OptIn(ExperimentalCoroutinesApi::class)
 class TodoViewModel @Inject constructor(
     private val observeTodos: ObserveTodosUseCase,
     private val saveTodo: SaveTodoUseCase,
@@ -33,7 +42,7 @@ class TodoViewModel @Inject constructor(
     private val toggleTodo: ToggleTodoUseCase,
     private val repository: TodoRepository,
     private val reminderScheduler: ReminderSchedulerContract,
-    @IoDispatcher private val dispatcher: CoroutineDispatcher,
+    @param:IoDispatcher private val dispatcher: CoroutineDispatcher,
 ) : ViewModel() {
     constructor(
         repository: TodoRepository,
@@ -51,6 +60,7 @@ class TodoViewModel @Inject constructor(
     private val filter = MutableStateFlow(TodoFilter())
     private val editor = MutableStateFlow(TodoEditorState())
     private val errorMessage = MutableStateFlow<String?>(null)
+    private val notificationGeneration = AtomicLong()
     private val todos = filter.flatMapLatest(observeTodos::invoke).catch { error ->
         errorMessage.value = "读取待办失败：${error.message ?: "未知错误"}"
         emit(emptyList())
@@ -91,6 +101,7 @@ class TodoViewModel @Inject constructor(
     }
 
     fun openEditor(todo: Todo? = null) {
+        if (editor.value.isSaving) return
         editor.value = TodoEditorState(
             isOpen = true,
             editingId = todo?.id,
@@ -103,16 +114,60 @@ class TodoViewModel @Inject constructor(
     }
 
     fun closeEditor() {
-        editor.value = TodoEditorState()
+        if (editor.value.isSaving) return
+        val previous = editor.getAndUpdate { TodoEditorState() }
+        drainNotification(previous)
     }
 
-    fun onTitleChanged(value: String) = editor.update { it.copy(title = value, validationMessage = null) }
-    fun onDescriptionChanged(value: String) = editor.update { it.copy(description = value) }
-    fun onPriorityChanged(value: com.example.lifemanager.domain.model.TodoPriority) = editor.update { it.copy(priority = value) }
-    fun onDueAtChanged(value: Instant?) = editor.update { it.copy(dueAt = value) }
-    fun onTagInputChanged(value: String) = editor.update { it.copy(tagInput = value) }
+    fun openNotificationDetail(id: Long) {
+        if (id <= 0L) return
+        val request = notificationGeneration.incrementAndGet()
+        val previous = editor.getAndUpdate {
+            if (it.isOpen) it.copy(pendingNotificationId = id, pendingNotificationToken = request) else it
+        }
+        if (previous.isOpen) return
+        loadNotificationDetail(id, request)
+    }
+
+    private fun drainNotification(previous: TodoEditorState) {
+        val id = previous.pendingNotificationId ?: return
+        val token = previous.pendingNotificationToken ?: return
+        // Keep its original order: draining an old deferred request is not a new tap.
+        loadNotificationDetail(id, token)
+    }
+
+    private fun loadNotificationDetail(id: Long, request: Long) {
+        if (request != notificationGeneration.get()) return
+        viewModelScope.launch {
+            try {
+                val target = withContext(dispatcher) { repository.getAllTodos().firstOrNull { it.id == id } }
+                if (request != notificationGeneration.get()) return@launch
+                // Atomic handoff: never attach a pending target to an already closed editor.
+                val previous = editor.getAndUpdate {
+                    if (it.isOpen) it.copy(pendingNotificationId = id, pendingNotificationToken = request) else it
+                }
+                if (previous.isOpen) return@launch
+                if (target == null) errorMessage.value = "通知对应的待办已删除或不存在"
+                else openEditor(target)
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                if (request == notificationGeneration.get())
+                    errorMessage.value = "读取通知待办失败：${error.message ?: "未知错误"}"
+            }
+        }
+    }
+
+    private fun edit(transform: (TodoEditorState) -> TodoEditorState) {
+        editor.update { if (it.isSaving) it else transform(it) }
+    }
+    fun onTitleChanged(value: String) = edit { it.copy(title = value, validationMessage = null) }
+    fun onDescriptionChanged(value: String) = edit { it.copy(description = value) }
+    fun onPriorityChanged(value: com.example.lifemanager.domain.model.TodoPriority) = edit { it.copy(priority = value) }
+    fun onDueAtChanged(value: Instant?) = edit { it.copy(dueAt = value) }
+    fun onTagInputChanged(value: String) = edit { it.copy(tagInput = value) }
 
     fun saveTodo() {
+        if (!editor.value.isOpen || editor.value.isSaving) return
         errorMessage.value = null
         val current = editor.value
         val validation = TodoRules.validateTitle(current.title)
@@ -122,31 +177,35 @@ class TodoViewModel @Inject constructor(
         }
         editor.update { it.copy(isSaving = true) }
         viewModelScope.launch(dispatcher) {
-            val now = Instant.now()
-            val existing = uiState.value.todos.firstOrNull { it.id == current.editingId }
-            val todo = Todo(
-                id = current.editingId ?: 0L,
-                title = current.title.trim(),
-                description = current.description.trim().ifEmpty { null },
-                priority = current.priority,
-                dueAt = current.dueAt,
-                isCompleted = existing?.isCompleted ?: false,
-                completedAt = existing?.completedAt,
-                createdAt = existing?.createdAt ?: now,
-                updatedAt = now,
-                tagNames = current.tagInput.split(",").map(String::trim).filter(String::isNotEmpty),
-            )
             try {
-                val id = saveTodo(todo, todo.tagNames)
-                if (todo.isCompleted || todo.dueAt == null) {
-                    reminderScheduler.cancel(id)
-                } else {
-                    reminderScheduler.schedule(id, todo.title, todo.dueAt)
+                TodoOperationCoordinator.run {
+                    val existing = current.editingId?.let { id ->
+                        requireNotNull(repository.getAllTodos().firstOrNull { it.id == id }) { "待办已删除，请关闭旧表单" }
+                    }
+                    val now = Instant.now()
+                    val todo = (existing ?: Todo(title = current.title, createdAt = now)).copy(
+                        title = current.title.trim(), description = current.description.trim().ifEmpty { null },
+                        priority = current.priority, dueAt = current.dueAt, updatedAt = now,
+                        tagNames = current.tagInput.split(",").map(String::trim).filter(String::isNotEmpty),
+                    )
+                    val id = saveTodo(todo, todo.tagNames)
+                    // A successful Room write must never remain a retryable unsaved insert.
+                    // Serialize the commit handoff with UI/notification editor changes on Main.
+                    val previous = withContext(Dispatchers.Main.immediate) {
+                        editor.getAndUpdate { TodoEditorState() }
+                    }
+                    try { reconcileReminder(todo.copy(id = id)) }
+                    catch (error: CancellationException) { throw error }
+                    catch (error: Exception) { errorMessage.value = "待办已保存，但提醒设置失败：${error.message ?: "未知错误"}" }
+                    drainNotification(previous)
                 }
-                editor.value = TodoEditorState()
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
-                errorMessage.value = "保存失败：${error.message ?: "未知错误"}"
-                editor.update { it.copy(isSaving = false) }
+                withContext(Dispatchers.Main.immediate) {
+                    errorMessage.value = "保存失败：${error.message ?: "未知错误"}"
+                    editor.update { it.copy(isSaving = false, validationMessage = errorMessage.value) }
+                }
             }
         }
     }
@@ -154,10 +213,15 @@ class TodoViewModel @Inject constructor(
     fun toggleTodo(todo: Todo) {
         viewModelScope.launch(dispatcher) {
             try {
-                val completed = !todo.isCompleted
-                toggleTodo(todo.id, completed)
-                if (completed || todo.dueAt == null) reminderScheduler.cancel(todo.id)
-                else reminderScheduler.schedule(todo.id, todo.title, todo.dueAt)
+                TodoOperationCoordinator.run {
+                    val current = requireNotNull(repository.getAllTodos().firstOrNull { it.id == todo.id }) { "待办已删除" }
+                    val completed = !current.isCompleted
+                    toggleTodo(todo.id, completed)
+                    try { reconcileReminder(current.copy(isCompleted = completed)) }
+                    catch (error: CancellationException) { throw error }
+                    catch (error: Exception) { errorMessage.value = "待办状态已更新，但提醒设置失败：${error.message ?: "未知错误"}" }
+                }
+            } catch (error: CancellationException) { throw error
             } catch (error: Exception) {
                 errorMessage.value = "更新待办失败：${error.message ?: "未知错误"}"
             }
@@ -167,15 +231,22 @@ class TodoViewModel @Inject constructor(
     fun deleteTodo(todoId: Long) {
         viewModelScope.launch(dispatcher) {
             try {
-                deleteTodoUseCase(todoId)
-                reminderScheduler.cancel(todoId)
+                TodoOperationCoordinator.run {
+                    deleteTodoUseCase(todoId)
+                    try { reminderScheduler.cancel(todoId) }
+                    catch (error: CancellationException) { throw error }
+                    catch (error: Exception) { errorMessage.value = "待办已删除，但提醒清理失败：${error.message ?: "未知错误"}" }
+                }
+            } catch (error: CancellationException) { throw error
             } catch (error: Exception) {
                 errorMessage.value = "删除失败：${error.message ?: "未知错误"}"
             }
         }
     }
-}
 
-private fun <T> MutableStateFlow<T>.update(transform: (T) -> T) {
-    value = transform(value)
+    private fun reconcileReminder(todo: Todo) {
+        val dueAt = todo.dueAt
+        if (todo.isCompleted || dueAt == null) reminderScheduler.cancel(todo.id)
+        else reminderScheduler.schedule(todo.id, todo.title, dueAt)
+    }
 }

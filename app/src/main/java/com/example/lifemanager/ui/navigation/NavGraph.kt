@@ -24,6 +24,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.lifemanager.ui.settings.SettingsScreen
 import com.example.lifemanager.ui.habit.HabitScreen
 import com.example.lifemanager.ui.todo.TodoScreen
+import com.example.lifemanager.ui.todo.TodoViewModel
 import com.example.lifemanager.ui.schedule.ScheduleScreen
 import com.example.lifemanager.ui.subscription.SubscriptionScreen
 import com.example.lifemanager.ui.subscription.SubscriptionViewModel
@@ -35,7 +36,8 @@ private const val HabitRoute = "habit"
 private const val SubscriptionRoute = "subscription"
 
 @Composable
-fun NavGraph(modifier: Modifier = Modifier, initialTodoId: Long? = null, initialScheduleId: Long? = null,
+fun NavGraph(todoViewModel: TodoViewModel, modifier: Modifier = Modifier, todoRequest: TodoNavigationRequest? = null,
+    onTodoConsumed: (Long) -> Unit = {}, initialScheduleId: Long? = null,
     subscriptionRequest: SubscriptionNavigationRequest? = null, onSubscriptionConsumed: (Long) -> Unit = {}) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -48,13 +50,15 @@ fun NavGraph(modifier: Modifier = Modifier, initialTodoId: Long? = null, initial
         SettingsRoute to ("设置" to Icons.Outlined.Settings),
     )
 
-    LaunchedEffect(initialTodoId, initialScheduleId) {
+    LaunchedEffect(initialScheduleId) {
         val destination = when {
             initialScheduleId != null -> ScheduleRoute
-            initialTodoId != null -> TodoRoute
             else -> null
         }
         destination?.let { navController.navigate(it) { launchSingleTop = true } }
+    }
+    LaunchedEffect(todoRequest?.token) {
+        if (todoRequest != null) navController.navigate(TodoRoute) { launchSingleTop = true }
     }
     LaunchedEffect(subscriptionRequest?.token) {
         if (subscriptionRequest != null) navController.navigate(SubscriptionRoute) { launchSingleTop = true }
@@ -82,7 +86,10 @@ fun NavGraph(modifier: Modifier = Modifier, initialTodoId: Long? = null, initial
         ) {
             composable(TodoRoute) {
                 TodoScreen(
-                    initialTodoId = initialTodoId,
+                    viewModel = todoViewModel,
+                    initialTodoId = todoRequest?.todoId,
+                    notificationToken = todoRequest?.token,
+                    onNotificationConsumed = onTodoConsumed,
                     onOpenSettings = { navController.navigate(SettingsRoute) },
                 )
             }

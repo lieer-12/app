@@ -41,11 +41,16 @@ object NotificationHelper {
         ) return
 
         createChannel(context)
+        val intent = Intent(context, MainActivity::class.java).putExtra(extraKey, id)
+        if (extraKey == TodoReminderReceiver.EXTRA_TODO_ID) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
         val openIntent = PendingIntent.getActivity(
             context,
             notificationId,
-            Intent(context, MainActivity::class.java).putExtra(extraKey, id),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            intent,
+            (if (extraKey == TodoReminderReceiver.EXTRA_TODO_ID) PendingIntent.FLAG_CANCEL_CURRENT
+                else PendingIntent.FLAG_UPDATE_CURRENT) or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = android.app.Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)

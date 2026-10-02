@@ -65,22 +65,16 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun TodoScreen(
     initialTodoId: Long? = null,
+    notificationToken: Long? = null,
+    onNotificationConsumed: (Long) -> Unit = {},
     onOpenSettings: () -> Unit,
     viewModel: TodoViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showSearch by remember { mutableStateOf(false) }
-    var deepLinkHandled by remember(initialTodoId) { mutableStateOf(false) }
-
-    LaunchedEffect(initialTodoId, state.todos) {
-        if (!deepLinkHandled) {
-            initialTodoId?.let { id ->
-                state.todos.firstOrNull { it.id == id }?.let {
-                    viewModel.openEditor(it)
-                    deepLinkHandled = true
-                }
-            }
-        }
+    LaunchedEffect(initialTodoId, notificationToken) {
+        initialTodoId?.let(viewModel::openNotificationDetail)
+        notificationToken?.let(onNotificationConsumed)
     }
 
     Scaffold(
@@ -317,14 +311,17 @@ private fun TodoEditorDialog(
                     if (state.dueAt != null) TextButton(onClick = { onDueAtChanged(null) }) { Text("清除") }
                 }
                 state.validationMessage?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
+                if (state.pendingNotificationId != null) Text("通知待办等待查看；保存或关闭当前草稿后打开")
             }
         },
         confirmButton = { Button(onClick = onSave, enabled = !state.isSaving) { Text("保存") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !state.isSaving) { Text("取消") } },
     )
 
     if (showDatePicker) {
-        val pickerState = rememberDatePickerState(initialSelectedDateMillis = state.dueAt?.toEpochMilli())
+        // Material DatePicker encodes a date at UTC midnight, not an arbitrary local instant.
+        val pickerState = rememberDatePickerState(initialSelectedDateMillis = state.dueAt
+            ?.atZone(ZoneId.systemDefault())?.toLocalDate()?.atStartOfDay(ZoneId.of("UTC"))?.toInstant()?.toEpochMilli())
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {

@@ -17,6 +17,8 @@ data class TodoEditorState(
     val tagInput: String = "",
     val validationMessage: String? = null,
     val isSaving: Boolean = false,
+    val pendingNotificationId: Long? = null,
+    val pendingNotificationToken: Long? = null,
 )
 
 data class TodoUiState(
