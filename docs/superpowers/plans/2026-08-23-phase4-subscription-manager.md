@@ -43,16 +43,16 @@
 - Produces Subscription, SubscriptionPayment, SubscriptionReminder and SubscriptionStats value types.
 - Produces validate(subscription): String?, effectiveNextBillingDate(subscription, today): LocalDate?, forecastOccurrences(subscription, rangeStart, rangeEnd): List<LocalDate>, calculateStats(subscriptions, payments, today): SubscriptionStats and exportCsv(subscriptions, payments): String.
 
-- [ ] **Step 1: Write the failing domain tests**
+- [x] **Step 1: Write the failing domain tests**
 
 ~~~kotlin
 @Test fun monthlyForecastKeepsActualPaymentsSeparate() {
     val stats = SubscriptionRules.calculateStats(listOf(monthlyCny), listOf(actualCny), LocalDate.of(2026, 8, 23))
-    assertThat(stats.months.single().forecastMinor).isEqualTo(1_500)
-    assertThat(stats.months.single().actualMinor).isEqualTo(1_200)
+    assertThat(stats.currentMonth.forecastMinor).isEqualTo(1_500L)
+    assertThat(stats.currentMonth.actualMinor).isEqualTo(1_200L)
 }
 @Test fun nonCnyValuesAreExcludedFromStatisticsButRetainedByCsv() {
-    assertThat(SubscriptionRules.calculateStats(listOf(monthlyUsd), emptyList(), LocalDate.of(2026, 8, 23)).forecastTotalMinor).isEqualTo(0)
+    assertThat(SubscriptionRules.calculateStats(listOf(monthlyUsd), emptyList(), LocalDate.of(2026, 8, 23)).currentMonth.forecastMinor).isEqualTo(0L)
     assertThat(SubscriptionRules.exportCsv(listOf(monthlyUsd), emptyList())).contains("USD")
 }
 @Test fun csvEscapesCommasQuotesAndNewlines() {
@@ -60,27 +60,21 @@
 }
 ~~~
 
-- [ ] **Step 2: Run the focused test to verify RED**
+- [x] **Step 2: Run the focused test to verify RED**
 
 Run: $env:JAVA_HOME='D:\jdk'; & 'D:\codex_work\app\app\.tools\gradle-9.4.1\bin\gradle.bat' --no-daemon :app:testDebugUnitTest --tests '*SubscriptionRulesTest'
 
 Expected: compilation/test failure because subscription rules do not exist.
 
-- [ ] **Step 3: Implement minimal immutable domain types and rules**
+- [x] **Step 3: Implement minimal immutable domain types and rules**
 
-~~~kotlin
-fun effectiveNextBillingDate(subscription: Subscription, today: LocalDate): LocalDate? =
-    if (!subscription.isActive) null else generateSequence(subscription.nextBillingDate) { it.advance(subscription.billingCycle) }
-        .first { !it.isBefore(today) }
-~~~
+Derive every occurrence independently from the original nextBillingDate anchor plus its cycle index, never by advancing the previously clamped date. Use LocalDate.plusWeeks, plusMonths, and plusYears; reject blank names and non-positive amounts; ignore occurrences strictly after cancelDate; total only records whose currency == "CNY". Totals use exact Long arithmetic and surface overflow rather than wrapping negative.
 
-Use LocalDate.plusWeeks, plusMonths, and plusYears; reject blank names and non-positive amounts; ignore occurrences strictly after cancelDate; total only records whose currency == "CNY".
-
-- [ ] **Step 4: Run focused domain tests to verify GREEN**
+- [x] **Step 4: Run focused domain tests to verify GREEN**
 
 Run the Step 2 command. Expected: all SubscriptionRulesTest cases pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ~~~powershell
 git add app/src/main/java/com/example/lifemanager/domain app/src/test/java/com/example/lifemanager/domain/usecase/SubscriptionRulesTest.kt
@@ -106,7 +100,7 @@ git commit -m "feat: add subscription domain rules"
 - saveSubscription(subscription: Subscription, reminderDays: Set<Int>): Long, savePayment(payment: SubscriptionPayment): Long, deletePayment(id: Long), deleteSubscription(id: Long).
 - SubscriptionDao.replaceReminders(subscriptionId: Long, days: Set<Int>) is transactional: delete old rows, insert 1/3/7 only.
 
-- [ ] **Step 1: Write failing DAO/migration tests**
+- [x] **Step 1: Write failing DAO/migration tests**
 
 ~~~kotlin
 @Test fun deletingSubscriptionCascadesPaymentsAndReminders() = runTest {
@@ -121,23 +115,23 @@ git commit -m "feat: add subscription domain rules"
 }
 ~~~
 
-- [ ] **Step 2: Build Android test APK to verify RED**
+- [x] **Step 2: Build Android test APK to verify RED**
 
 Run: :app:assembleDebugAndroidTest --no-daemon
 
 Expected: test compilation fails because subscription entities/DAO and migration do not exist.
 
-- [ ] **Step 3: Add entities, DAO, mappings, repository binding and Migration(3, 4)**
+- [x] **Step 3: Add entities, DAO, mappings, repository binding and Migration(3, 4)**
 
 The migration creates subscriptions, subscription_payments and subscription_reminders with foreign keys/indexes and no data-altering SQL for prior tables. Set database version = 4, register all entities/DAO and update Room schema JSON. Repository writes trim optional text and preserve createdAt for edits.
 
-- [ ] **Step 4: Verify storage compilation and unit tests**
+- [x] **Step 4: Verify storage compilation and unit tests**
 
 Run: :app:assembleDebugAndroidTest --no-daemon and :app:testDebugUnitTest --tests '*SubscriptionRulesTest' --no-daemon.
 
 Expected: Android-test APK compiles; JVM rules stay green. Record device execution separately.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ~~~powershell
 git add app/src/main app/src/androidTest app/schemas
@@ -162,7 +156,7 @@ git commit -m "feat: persist subscriptions with Room migration"
 - schedule(subscription: Subscription, reminderDays: Set<Int>), cancel(subscriptionId: Long, reminderDays: Set<Int>), cancelAll(subscriptionId: Long).
 - ReminderKey.forSubscription(subscriptionId: Long, daysBefore: Int): Int is stable and distinct from Todo/Schedule keys.
 
-- [ ] **Step 1: Extend reminder-key test first**
+- [x] **Step 1: Extend reminder-key test first**
 
 ~~~kotlin
 @Test fun subscriptionReminderIdsDistinguishDaysAndSubscriptions() {
@@ -170,21 +164,21 @@ git commit -m "feat: persist subscriptions with Room migration"
 }
 ~~~
 
-- [ ] **Step 2: Run focused test to verify RED**
+- [x] **Step 2: Run focused test to verify RED**
 
 Run: :app:testDebugUnitTest --tests '*ReminderKeyTest' --no-daemon.
 
 Expected: compilation failure for forSubscription.
 
-- [ ] **Step 3: Implement alarm, receiver and notification wiring**
+- [x] **Step 3: Implement alarm, receiver and notification wiring**
 
-At effectiveNextBillingDate.minusDays(daysBefore).atTime(9, 0), schedule exact if permitted and inexact otherwise. Always cancel matching PendingIntents before replacement. Receiver calls NotificationHelper.showSubscriptionReminder; content PendingIntent carries MainActivity.EXTRA_SUBSCRIPTION_ID. BootReceiver and worker load active subscriptions/reminder days and rehydrate schedules.
+For each offset seek its next future local 09:00 reminder; schedule exact if permitted and inexact otherwise. Cancel matching PendingIntents before replacement, except ordinary reconciliation preserves today's valid inexact alarm still awaiting delivery. Only a validated delivered occurrence is consumed before rearming. Receiver uses dedicated SubscriptionNotificationHelper; content PendingIntent carries MainActivity.EXTRA_SUBSCRIPTION_ID. A shared domain coroutine gate serializes Room snapshots, UI mutations, scheduling and posting. BootReceiver and worker reload subscriptions/reminder days and rehydrate schedules.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: :app:testDebugUnitTest --tests '*ReminderKeyTest' --no-daemon and :app:assembleDebug --no-daemon.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ~~~powershell
 git add app/src/main app/src/test/java/com/example/lifemanager/notification
@@ -203,7 +197,7 @@ git commit -m "feat: schedule subscription reminders"
 - Actions: openEditor, saveSubscription, cancelSubscription, restoreSubscription, deleteSubscription, openPaymentEditor, savePayment, deletePayment and prepareCsvExport.
 - Saving reconciles repository data first, then SubscriptionReminderSchedulerContract.cancelAll(id) and schedule(saved, reminderDays).
 
-- [ ] **Step 1: Write failing ViewModel tests**
+- [x] **Step 1: Write failing ViewModel tests**
 
 ~~~kotlin
 @Test fun savingActiveSubscriptionSchedulesEachSelectedReminderDay() = runTest {
@@ -218,21 +212,21 @@ git commit -m "feat: schedule subscription reminders"
 }
 ~~~
 
-- [ ] **Step 2: Run focused test to verify RED**
+- [x] **Step 2: Run focused test to verify RED**
 
 Run: :app:testDebugUnitTest --tests '*SubscriptionViewModelTest' --no-daemon.
 
 Expected: compilation failure because the ViewModel is absent.
 
-- [ ] **Step 3: Implement StateFlow composition and error states**
+- [x] **Step 3: Implement StateFlow composition and error states**
 
 Combine repository flows with selected tab/editor flows and SubscriptionRules.calculateStats. Validate before dispatching I/O, expose Chinese validation/error text and leave editor open on storage failure. Do not access a DAO.
 
-- [ ] **Step 4: Run focused ViewModel test to verify GREEN**
+- [x] **Step 4: Run focused ViewModel test to verify GREEN**
 
 Run the Step 2 command. Expected: all state/action tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ~~~powershell
 git add app/src/main/java/com/example/lifemanager/ui/subscription app/src/test/java/com/example/lifemanager/ui/subscription
@@ -247,10 +241,10 @@ git commit -m "feat: add subscription state management"
 - Test: app/src/androidTest/java/com/example/lifemanager/ui/subscription/SubscriptionScreenTest.kt
 
 **Interfaces:**
-- SubscriptionScreen(initialSubscriptionId: Long? = null) reads SubscriptionViewModel via Hilt.
-- NavGraph accepts initialSubscriptionId; MainActivity reads EXTRA_SUBSCRIPTION_ID and starts/opens SubscriptionRoute for notification deep links.
+- SubscriptionScreen reads SubscriptionViewModel via Hilt.
+- MainActivity reads EXTRA_SUBSCRIPTION_ID into an Activity-owned consumable navigation event; NavGraph opens SubscriptionRoute and detail, then consumes its unique token. Rotation cannot replay a consumed event, and another tap for the same ID creates a new event.
 
-- [ ] **Step 1: Write a failing Compose interaction test**
+- [x] **Step 1: Write a failing Compose interaction test**
 
 ~~~kotlin
 @Test fun addSubscriptionButtonOpensEditableSubscriptionForm() {
@@ -259,25 +253,25 @@ git commit -m "feat: add subscription state management"
 }
 ~~~
 
-- [ ] **Step 2: Build Android test APK to verify RED**
+- [x] **Step 2: Build Android test APK to verify RED**
 
 Run: :app:assembleDebugAndroidTest --no-daemon.
 
 Expected: test compilation failure because the subscription screen and route are absent.
 
-- [ ] **Step 3: Implement Material 3 screen and native charts**
+- [x] **Step 3: Implement Material 3 screen and native charts**
 
-Implement list/stats tabs, summary cards, effective-due-date sorting, empty/error states, editor/detail/payment dialogs and cancellation/deletion confirmations. Add 6-month dual bars, category segments and billing-cycle comparison with text equivalents/content descriptions. Use rememberLauncherForActivityResult(CreateDocument("text/csv")) and write the ViewModel CSV string as UTF-8 BOM only after privacy confirmation.
+Implement list/stats tabs, summary cards, effective-due-date sorting, empty/error states, editor/detail/payment dialogs and cancellation/deletion confirmations. Add 6-month dual bars, category segments and billing-cycle comparison with text equivalents/content descriptions. Use rememberLauncherForActivityResult(CreateDocument("text/csv")); after privacy confirmation the ViewModel owns the CSV snapshot/write/progress/result so composition recreation does not cancel the write. The application-context writer creates UTF-8 BOM output on IO.
 
-- [ ] **Step 4: Add the navigation entry only now**
+- [x] **Step 4: Add the navigation entry only now**
 
 Add Subscription route/icon to bottom navigation, preserving Todo/Schedule/Habit/Settings. Route notification IDs to subscription detail and do not add Phase 5 UI.
 
-- [ ] **Step 5: Verify UI compilation**
+- [x] **Step 5: Verify UI compilation**
 
 Run: :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ~~~powershell
 git add app/src/main/java/com/example/lifemanager/ui app/src/main/java/com/example/lifemanager/MainActivity.kt app/src/androidTest/java/com/example/lifemanager/ui/subscription
@@ -294,7 +288,7 @@ git commit -m "feat: add subscription manager UI"
 **Interfaces:**
 - Structure check validates v4 migration, subscription UI/domain/data/reminder files and rejects Phase 5 backup/restore or currency-conversion placeholders.
 
-- [ ] **Step 1: Write the static structure check**
+- [x] **Step 1: Write the static structure check**
 
 ~~~powershell
 Assert-Path 'app/src/main/java/com/example/lifemanager/ui/subscription/SubscriptionScreen.kt'
@@ -302,17 +296,17 @@ Assert-Content 'LifeManagerDatabase.kt' 'Migration(3, 4)'
 Assert-NoPath 'app/src/main/java/com/example/lifemanager/ui/backup'
 ~~~
 
-- [ ] **Step 2: Run the check to verify RED, then implement the minimal check**
+- [x] **Step 2: Run the check to verify RED, then implement the minimal check**
 
 Run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/check-phase4-structure.ps1.
 
 Expected before the script exists: failure; after adding it: output Phase 4 structure check passed.
 
-- [ ] **Step 3: Document completed scope and unrun work honestly**
+- [x] **Step 3: Document completed scope and unrun work honestly**
 
 README lists Phase 4 capabilities and exact JDK 25/Gradle 9.4.1 commands. Acceptance report lists CNY-only aggregation, no exchange conversion, actual-versus-forecast behavior, instrumentation status, warning baseline and CSV privacy notice.
 
-- [ ] **Step 4: Run final verification**
+- [x] **Step 4: Run final verification**
 
 ~~~powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/check-phase4-structure.ps1
@@ -322,7 +316,7 @@ $env:JAVA_HOME='D:\jdk'
 
 Read XML reports and Gradle exit code before reporting success. Run adb devices; if no target is attached, document Android tests as compiled but not executed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ~~~powershell
 git add README.md docs/phase4-acceptance.md tools/check-phase4-structure.ps1
