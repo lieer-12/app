@@ -10,17 +10,14 @@ import com.example.lifemanager.domain.repository.SettingsRepository
 import com.example.lifemanager.domain.usecase.SettingsRules
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 
 class SettingsRepositoryImpl @Inject constructor(private val database: LifeManagerDatabase) : SettingsRepository {
     private val dao = database.settingsDao()
 
-    override fun observeSettings(): Flow<AppSettings> = flow {
-        database.withTransaction { initialize() }
-        emitAll(dao.observe().map { checkNotNull(it) { "设置记录不可用" }.toDomain() })
-    }
+    // Creation/migration seed defaults. A long-lived invalidation subscription must never write.
+    override fun observeSettings(): Flow<AppSettings> =
+        dao.observe().map { checkNotNull(it) { "设置记录不可用" }.toDomain() }
 
     override suspend fun getSettings(): AppSettings = database.withTransaction {
         initialize()

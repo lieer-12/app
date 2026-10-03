@@ -50,8 +50,10 @@ import com.example.lifemanager.domain.model.DateFormat
 @Composable
 fun SettingsScreen(onBack: () -> Unit, viewModel: SettingsViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    SettingsContent(state, viewModel::setTheme, viewModel::retry, onBack,
-        viewModel::setDateFormat, viewModel::setDefaultCurrency, viewModel::setDefaultReminderDay)
+    val renderedGeneration = state.generation
+    SettingsContent(state, { viewModel.setTheme(it, renderedGeneration) }, { viewModel.retry(renderedGeneration) }, onBack,
+        { viewModel.setDateFormat(it, renderedGeneration) }, { viewModel.setDefaultCurrency(it, renderedGeneration) },
+        { day, selected -> viewModel.setDefaultReminderDay(day, selected, renderedGeneration) })
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -78,11 +80,11 @@ fun SettingsContent(state: SettingsUiState, onThemeChanged: (ThemeMode) -> Unit,
             if (state.isLoading || state.isSaving) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             state.errorMessage?.let {
                 Text(it, color = MaterialTheme.colorScheme.error)
-                Button(onClick = onRetry, enabled = !state.isSaving) { Text("重新读取设置") }
+                Button(onClick = onRetry, enabled = !state.isSaving && !state.isMaintaining) { Text("重新读取设置") }
             }
             state.settings?.let { saved ->
                 Text("主题", style = MaterialTheme.typography.titleLarge)
-                val editable = state.isAvailable && !state.isLoading && !state.isSaving
+                val editable = state.isAvailable && !state.isLoading && !state.isSaving && !state.isMaintaining
                 listOf(ThemeMode.SYSTEM to "跟随系统", ThemeMode.LIGHT to "浅色", ThemeMode.DARK to "深色").forEach { (mode, label) ->
                     Row(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(
                         selected = saved.theme == mode, enabled = editable, role = Role.RadioButton,
@@ -104,7 +106,7 @@ fun SettingsContent(state: SettingsUiState, onThemeChanged: (ThemeMode) -> Unit,
                 }
                 Text("仅改变日期展示；订阅日期输入和 CSV 导出仍使用 YYYY-MM-DD。", style = MaterialTheme.typography.bodySmall)
                 Text("新建订阅偏好", style = MaterialTheme.typography.titleLarge)
-                var currency by remember(saved.defaultCurrency) { mutableStateOf(saved.defaultCurrency) }
+                var currency by remember(saved.defaultCurrency, state.generation) { mutableStateOf(saved.defaultCurrency) }
                 OutlinedTextField(currency, { currency = it }, enabled = editable, singleLine = true,
                     label = { Text("新订阅默认币种（ISO 4217）") }, modifier = Modifier.fillMaxWidth())
                 Button(onClick = { onCurrencyChanged(currency) }, enabled = editable) { Text("保存默认币种") }

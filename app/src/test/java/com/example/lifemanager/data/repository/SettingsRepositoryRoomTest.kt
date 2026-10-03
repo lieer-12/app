@@ -27,16 +27,31 @@ class SettingsRepositoryRoomTest {
     private lateinit var database: LifeManagerDatabase
     private lateinit var repository: SettingsRepositoryImpl
     @Before fun setup() {
-        database = Room.inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), LifeManagerDatabase::class.java).build()
+        database = Room.inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), LifeManagerDatabase::class.java)
+            .addCallback(LifeManagerDatabase.INITIALIZE).build()
         repository = SettingsRepositoryImpl(database)
     }
     @After fun cleanup() = database.close()
 
-    @Test fun firstReadPersistsDefaultsWithoutWritingAnyBusinessRecords(): Unit = runBlocking {
+    @Test fun databaseCreationPersistsDefaultsAndFirstReadDoesNotWriteBusinessRecords(): Unit = runBlocking {
         assertEquals(ThemeMode.SYSTEM, repository.observeSettings().first().theme)
         assertEquals("CNY", repository.getSettings().defaultCurrency)
         assertEquals("SYSTEM", database.settingsDao().get()!!.theme)
         assertTrue(database.todoDao().getAll().isEmpty())
+    }
+
+    @Test fun observingSettingsIsSideEffectFreeEvenWithAnInsertRejectingTrigger(): Unit = runBlocking {
+        database.settingsDao().get() // Opens the real factory-initialized schema before installing the test trigger.
+        database.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER test_no_observation_insert BEFORE INSERT ON app_settings BEGIN SELECT RAISE(ABORT, 'observation must not initialize'); END",
+        )
+        assertEquals(ThemeMode.SYSTEM, repository.observeSettings().first().theme)
+    }
+
+    @Test fun observingMissingSettingsFailsInsteadOfRepairingDuringSubscription(): Unit = runBlocking {
+        database.openHelper.writableDatabase.execSQL("DELETE FROM app_settings")
+        assertFailsWith<IllegalStateException> { repository.observeSettings().first() }
+        assertEquals(null, database.settingsDao().get())
     }
 
     @Test fun settingsRoundTripRetainsIndependentFieldsAndAllReminderBits(): Unit = runBlocking {

@@ -12,6 +12,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import com.example.lifemanager.domain.model.AppSettings
 import com.example.lifemanager.domain.model.ThemeMode
 import com.example.lifemanager.domain.model.DateFormat
+import com.example.lifemanager.domain.maintenance.DataGeneration
+import com.example.lifemanager.ui.common.testGenerationAccess
 import com.example.lifemanager.ui.theme.LifeManagerTheme
 import org.junit.Rule
 import org.junit.Test
@@ -105,17 +107,41 @@ class SettingsScreenTest {
 
     @Test fun aSecondAcceptedReminderChangePreservesTheCommittedFirstDayBeforeObservationCatchesUp() {
         val repository = DelayedObservationPreferences()
-        val model = SettingsViewModel(repository, Dispatchers.IO)
+        val model = SettingsViewModel(repository, Dispatchers.IO, testGenerationAccess())
         try {
             compose.setContent { LifeManagerTheme { SettingsScreen({}, model) } }
-            compose.waitUntil(5000) { model.uiState.value.isAvailable }
+            compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.isAvailable }
             compose.onNodeWithText("提前 1 天").performScrollTo().performClick()
-            compose.waitUntil(5000) { !model.uiState.value.isSaving && 1 in repository.saved.value.defaultReminderDays }
+            compose.waitUntil(5000) { compose.waitForIdle(); !model.uiState.value.isSaving && 1 in repository.saved.value.defaultReminderDays }
             kotlin.test.assertEquals(emptySet(), model.uiState.value.settings!!.defaultReminderDays)
             compose.onNodeWithText("提前 7 天").performScrollTo().performClick()
-            compose.waitUntil(5000) { !model.uiState.value.isSaving && 7 in repository.saved.value.defaultReminderDays }
+            compose.waitUntil(5000) { compose.waitForIdle(); !model.uiState.value.isSaving && 7 in repository.saved.value.defaultReminderDays }
             kotlin.test.assertEquals(setOf(1, 7), repository.saved.value.defaultReminderDays)
         } finally { model.viewModelScope.cancel() }
+    }
+
+    @Test fun maintenanceDisablesPreferenceWritesAndRetry() {
+        compose.setContent { LifeManagerTheme {
+            SettingsContent(SettingsUiState(settings = AppSettings(), isLoading = false,
+                isAvailable = true, isMaintaining = true, errorMessage = "读取设置失败，请重试"), {}, {}, {})
+        } }
+        compose.onNodeWithText("深色").assertIsNotEnabled()
+        compose.onNodeWithText("重新读取设置").assertIsNotEnabled()
+        compose.onNodeWithText("DD-MM-YYYY").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("保存默认币种").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("提前 7 天").performScrollTo().assertIsNotEnabled()
+    }
+
+    @Test fun currencyDraftSurvivesCancelledFreezeButResetsOnCommittedGenerationWithSameCurrency() {
+        val state = mutableStateOf(SettingsUiState(settings = AppSettings(), isLoading = false,
+            isAvailable = true, generation = DataGeneration(0)))
+        compose.setContent { LifeManagerTheme { SettingsContent(state.value, {}, {}, {}) } }
+        compose.onNodeWithText("新订阅默认币种（ISO 4217）").performScrollTo().performTextReplacement("EUR")
+        compose.runOnIdle { state.value = state.value.copy(isMaintaining = true) }
+        compose.runOnIdle { state.value = state.value.copy(isMaintaining = false) }
+        compose.onNodeWithText("新订阅默认币种（ISO 4217）").assertTextContains("EUR")
+        compose.runOnIdle { state.value = state.value.copy(generation = DataGeneration(1)) }
+        compose.onNodeWithText("新订阅默认币种（ISO 4217）").assertTextContains("CNY")
     }
 
     private class DelayedObservationPreferences : SettingsRepository {

@@ -3,6 +3,7 @@ package com.example.lifemanager.ui.habit
 import com.example.lifemanager.domain.model.Habit
 import com.example.lifemanager.domain.model.HabitFrequencyType
 import com.example.lifemanager.domain.model.HabitPeriodProgress
+import com.example.lifemanager.domain.maintenance.DataGeneration
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -11,6 +12,7 @@ import java.time.YearMonth
 enum class HabitTab { TASKS, STATS }
 
 data class HabitEditorState(
+    val generation: DataGeneration? = null,
     val isOpen: Boolean = false,
     val editingId: Long? = null,
     val createdAt: Instant? = null,
@@ -55,6 +57,9 @@ data class HabitStatistics(
 )
 
 data class HabitUiState(
+    val generation: DataGeneration? = null,
+    val isMaintaining: Boolean = false,
+    val isAvailable: Boolean = false,
     val habits: List<Habit> = emptyList(),
     val cards: List<HabitCard> = emptyList(),
     val selectedTab: HabitTab = HabitTab.TASKS,

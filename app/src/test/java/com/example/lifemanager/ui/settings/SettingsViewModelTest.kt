@@ -5,6 +5,7 @@ import com.example.lifemanager.domain.model.AppSettings
 import com.example.lifemanager.domain.model.ThemeMode
 import com.example.lifemanager.domain.model.DateFormat
 import com.example.lifemanager.domain.repository.SettingsRepository
+import com.example.lifemanager.ui.common.testGenerationAccess
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -171,7 +172,7 @@ class SettingsViewModelTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
         val repository = Preferences()
-        val model = SettingsViewModel(repository, dispatcher)
+        val model = SettingsViewModel(repository, dispatcher, testGenerationAccess())
         try { block(model, repository) } finally { model.viewModelScope.cancel(); Dispatchers.resetMain() }
     }
 

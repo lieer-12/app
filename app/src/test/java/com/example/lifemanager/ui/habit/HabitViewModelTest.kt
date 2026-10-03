@@ -5,6 +5,7 @@ import com.example.lifemanager.domain.model.Habit
 import com.example.lifemanager.domain.model.HabitFrequencyType
 import com.example.lifemanager.domain.model.HabitRecord
 import com.example.lifemanager.domain.repository.HabitRepository
+import com.example.lifemanager.ui.common.testGenerationAccess
 import java.time.Instant
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +33,7 @@ class HabitViewModelTest {
         Dispatchers.setMain(dispatcher)
         var viewModel: HabitViewModel? = null
         try {
-            val model = HabitViewModel(FakeHabitRepository(), dispatcher)
+            val model = HabitViewModel(FakeHabitRepository(), dispatcher, testGenerationAccess())
             viewModel = model
             advanceUntilIdle()
 
@@ -58,6 +59,7 @@ class HabitViewModelTest {
             val model = HabitViewModel(
                 FakeHabitRepository(habits = listOf(habit(id = 1))),
                 dispatcher,
+                testGenerationAccess(),
             )
             viewModel = model
             advanceUntilIdle()
@@ -113,7 +115,7 @@ class HabitViewModelTest {
     ) {
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
-        val model = HabitViewModel(repository, dispatcher)
+        val model = HabitViewModel(repository, dispatcher, testGenerationAccess())
         try {
             advanceUntilIdle()
             body(model)
