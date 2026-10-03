@@ -1,8 +1,8 @@
 package com.example.lifemanager.di
 
 import android.content.Context
-import androidx.room.Room
 import com.example.lifemanager.data.local.LifeManagerDatabase
+import com.example.lifemanager.data.local.LifeManagerDatabaseFactory
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -16,8 +16,5 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): LifeManagerDatabase =
-        Room.databaseBuilder(context, LifeManagerDatabase::class.java, "life-manager.db")
-            .addMigrations(*LifeManagerDatabase.MIGRATIONS)
-            .addCallback(LifeManagerDatabase.INITIALIZE)
-            .build()
+        LifeManagerDatabaseFactory.open(context)
 }

@@ -1,13 +1,12 @@
 package com.example.lifemanager.notification
 
 import android.content.Context
-import androidx.room.Room
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.example.lifemanager.data.local.LifeManagerDatabase
+import com.example.lifemanager.data.local.LifeManagerDatabaseFactory
 import com.example.lifemanager.data.repository.toDomain
 import com.example.lifemanager.domain.usecase.SubscriptionOperationCoordinator
 import com.example.lifemanager.domain.usecase.TodoOperationCoordinator
@@ -20,11 +19,7 @@ class ReminderReconciliationWorker(
     workerParams: WorkerParameters,
 ) : CoroutineWorker(appContext, workerParams) {
     override suspend fun doWork(): Result {
-        val database = Room.databaseBuilder(
-            applicationContext,
-            LifeManagerDatabase::class.java,
-            "life-manager.db",
-        ).addMigrations(*LifeManagerDatabase.MIGRATIONS).build()
+        val database = LifeManagerDatabaseFactory.open(applicationContext)
         return try {
             val scheduler = ReminderScheduler(applicationContext)
             val scheduleScheduler = ScheduleReminderScheduler(applicationContext)

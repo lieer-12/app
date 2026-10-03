@@ -9,6 +9,8 @@ import com.example.lifemanager.domain.repository.TodoRepository
 import com.example.lifemanager.domain.repository.SubscriptionRepository
 import com.example.lifemanager.data.repository.SubscriptionRepositoryImpl
 import com.example.lifemanager.data.repository.SettingsRepositoryImpl
+import com.example.lifemanager.data.repository.DataGenerationRepositoryImpl
+import com.example.lifemanager.domain.maintenance.DataGenerationRepository
 import com.example.lifemanager.domain.repository.SettingsRepository
 import com.example.lifemanager.data.backup.BackupRepositoryImpl
 import com.example.lifemanager.domain.backup.BackupRepository
@@ -58,6 +60,10 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindSettingsRepository(impl: SettingsRepositoryImpl): SettingsRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindDataGenerationRepository(impl: DataGenerationRepositoryImpl): DataGenerationRepository
 
     @Binds
     @Singleton

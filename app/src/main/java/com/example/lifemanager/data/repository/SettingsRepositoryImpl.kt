@@ -3,7 +3,6 @@ package com.example.lifemanager.data.repository
 import androidx.room.withTransaction
 import com.example.lifemanager.data.local.LifeManagerDatabase
 import com.example.lifemanager.data.local.entity.AppSettingsEntity
-import com.example.lifemanager.data.local.entity.MaintenanceEntity
 import com.example.lifemanager.domain.model.AppSettings
 import com.example.lifemanager.domain.model.DateFormat
 import com.example.lifemanager.domain.model.ThemeMode
@@ -40,7 +39,6 @@ class SettingsRepositoryImpl @Inject constructor(private val database: LifeManag
 
     private suspend fun initialize() {
         dao.initialize(AppSettingsEntity())
-        dao.initializeMaintenance(MaintenanceEntity())
     }
 }
 

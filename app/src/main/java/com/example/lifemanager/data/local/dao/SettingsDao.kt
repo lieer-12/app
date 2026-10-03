@@ -31,6 +31,6 @@ interface SettingsDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun initializeMaintenance(metadata: MaintenanceEntity)
 
-    @Query("UPDATE app_maintenance SET generation=generation+1 WHERE id=1")
-    suspend fun advanceGeneration()
+    @Query("UPDATE app_maintenance SET generation=:next WHERE id=1 AND generation=:expected")
+    suspend fun advanceGeneration(expected: Long, next: Long): Int
 }
