@@ -20,23 +20,18 @@ class SettingsRepositoryImpl @Inject constructor(private val database: LifeManag
         dao.observe().map { checkNotNull(it) { "设置记录不可用" }.toDomain() }
 
     override suspend fun getSettings(): AppSettings = database.withTransaction {
-        initialize()
-        checkNotNull(dao.get()).toDomain()
+        checkNotNull(dao.get()) { "设置记录不可用" }.toDomain()
     }
 
     override suspend fun updateSettings(transform: (AppSettings) -> AppSettings) {
         database.withTransaction {
-            initialize()
-            val current = checkNotNull(dao.get()).toDomain()
+            val current = checkNotNull(dao.get()) { "设置记录不可用" }.toDomain()
             val changed = transform(current)
             require(SettingsRules.validate(changed) == null) { SettingsRules.validate(changed).orEmpty() }
             dao.save(changed.toEntity())
         }
     }
 
-    private suspend fun initialize() {
-        dao.initialize(AppSettingsEntity())
-    }
 }
 
 internal fun AppSettingsEntity.toDomain(): AppSettings {

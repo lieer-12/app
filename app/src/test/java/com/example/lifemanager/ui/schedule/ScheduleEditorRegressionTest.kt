@@ -5,6 +5,7 @@ import com.example.lifemanager.domain.model.*
 import com.example.lifemanager.domain.repository.ScheduleRepository
 import com.example.lifemanager.domain.usecase.ScheduleOperationCoordinator
 import com.example.lifemanager.notification.ScheduleReminderSchedulerContract
+import com.example.lifemanager.ui.common.testGenerationAccess
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -269,9 +270,14 @@ class ScheduleEditorRegressionTest {
             override fun cancel(scheduleId: Long) = Unit
         }
         Dispatchers.setMain(main)
-        val model = ScheduleViewModel(repository, alarms, io)
+        val model = ScheduleViewModel(repository, alarms, io, testGenerationAccess())
         try {
-            runCurrent()
+            val initialTimeout = System.nanoTime() + 5_000_000_000L
+            while (!model.uiState.value.isAvailable && System.nanoTime() < initialTimeout) {
+                runCurrent()
+                Thread.yield()
+            }
+            assertTrue(model.uiState.value.isAvailable)
             model.openEditor(); model.onTitleChanged("提交中的草稿")
             model.onStartChanged(Instant.parse("2026-10-06T01:00:00Z"))
             model.onEndChanged(Instant.parse("2026-10-06T02:00:00Z"))
@@ -285,7 +291,7 @@ class ScheduleEditorRegressionTest {
             assertTrue(ioQueueReached.await(5, TimeUnit.SECONDS))
             assertFalse(alarmStarted.get(), "Main must hand off the editor before alarm side effects")
             val timeout = System.nanoTime() + 5_000_000_000L
-            do { runCurrent(); if (model.uiState.value.editor.editingId == 7L) break; Thread.sleep(10) }
+            do { runCurrent(); if (model.uiState.value.editor.editingId == 7L) break; Thread.yield() }
             while (System.nanoTime() < timeout)
             assertEquals(7L, model.uiState.value.editor.editingId)
             assertTrue(alarmStarted.get())
@@ -300,7 +306,7 @@ class ScheduleEditorRegressionTest {
     private suspend fun TestScope.withModel(repository: Records, alarms: ScheduleReminderSchedulerContract = NoAlarms, action: suspend (ScheduleViewModel) -> Unit) {
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
-        val model = ScheduleViewModel(repository, alarms, dispatcher)
+        val model = ScheduleViewModel(repository, alarms, dispatcher, testGenerationAccess())
         try { advanceUntilIdle(); action(model) }
         finally { model.viewModelScope.cancel(); Dispatchers.resetMain() }
     }

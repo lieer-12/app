@@ -22,6 +22,9 @@ class GenerationAccess @Inject constructor(
     val generations get() = generationsRepository.observe()
     val maintenance get() = coordinator.state
 
+    /** One-shot admission for a notification received before a page has a verified snapshot. */
+    suspend fun capture(): DataGeneration = coordinator.capture()
+
     // This is an early rejection, not a permit. run() checks again after coroutine dispatch.
     fun eventToken(published: DataGeneration?): DataGeneration {
         if (maintenance.value != MaintenanceState.IDLE) throw MaintenanceBusyException()

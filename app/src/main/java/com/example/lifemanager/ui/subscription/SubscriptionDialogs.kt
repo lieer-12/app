@@ -14,33 +14,35 @@ import java.time.LocalDate
 import com.example.lifemanager.ui.settings.displayDate
 
 @Composable
-internal fun SubscriptionEditor(editor: SubscriptionEditorState, model: SubscriptionViewModel, pendingNotificationLabel: String? = null) {
-    AlertDialog(onDismissRequest = model::closeEditor, title = {
+internal fun SubscriptionEditor(editor: SubscriptionEditorState, model: SubscriptionViewModel, pendingNotificationLabel: String? = null, canMutate: Boolean = true) {
+    val editorGeneration = editor.generation
+    val editable = !editor.isSaving && canMutate
+    AlertDialog(onDismissRequest = { model.closeEditor(editorGeneration) }, title = {
         EditorDialogTitle(if (editor.original == null) "新建订阅" else "编辑订阅", pendingNotificationLabel)
     },
         text = {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("Netflix", "Spotify", "iCloud", "微信读书").forEach { name ->
-                        SuggestionChip(onClick = { model.updateEditor { it.copy(name = name) } }, label = { Text(name) }, enabled = !editor.isSaving)
+                        SuggestionChip(onClick = { model.updateEditor(editorGeneration) { it.copy(name = name) } }, label = { Text(name) }, enabled = editable)
                     }
                 } }
-                item { EditField("订阅名称", editor.name, !editor.isSaving) { value -> model.updateEditor { it.copy(name = value) } } }
-                item { EditField("金额", editor.amount, !editor.isSaving) { value -> model.updateEditor { it.copy(amount = value) } } }
-                item { EditField("币种（ISO 4217，例如 CNY）", editor.currency, !editor.isSaving && !editor.isLoadingReminders && editor.preferencesError == null) { value -> model.updateEditor { it.copy(currency = value) } } }
+                item { EditField("订阅名称", editor.name, editable) { value -> model.updateEditor(editorGeneration) { it.copy(name = value) } } }
+                item { EditField("金额", editor.amount, editable) { value -> model.updateEditor(editorGeneration) { it.copy(amount = value) } } }
+                item { EditField("币种（ISO 4217，例如 CNY）", editor.currency, editable && !editor.isLoadingReminders && editor.preferencesError == null) { value -> model.updateEditor(editorGeneration) { it.copy(currency = value) } } }
                 item { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     BillingCycle.entries.forEach { cycle -> FilterChip(editor.billingCycle == cycle,
-                        onClick = { model.updateEditor { it.copy(billingCycle = cycle) } }, label = { Text(cycleLabel(cycle)) }, enabled = !editor.isSaving) }
+                        onClick = { model.updateEditor(editorGeneration) { it.copy(billingCycle = cycle) } }, label = { Text(cycleLabel(cycle)) }, enabled = editable) }
                 } }
-                item { EditField("下次扣费日期（YYYY-MM-DD）", editor.nextBillingDate, !editor.isSaving) { value -> model.updateEditor { it.copy(nextBillingDate = value) } } }
-                item { EditField("开始日期（YYYY-MM-DD）", editor.startDate, !editor.isSaving) { value -> model.updateEditor { it.copy(startDate = value) } } }
-                item { EditField("分类（可选）", editor.category, !editor.isSaving) { value -> model.updateEditor { it.copy(category = value) } } }
-                item { EditField("备注（可选）", editor.note, !editor.isSaving) { value -> model.updateEditor { it.copy(note = value) } } }
+                item { EditField("下次扣费日期（YYYY-MM-DD）", editor.nextBillingDate, editable) { value -> model.updateEditor(editorGeneration) { it.copy(nextBillingDate = value) } } }
+                item { EditField("开始日期（YYYY-MM-DD）", editor.startDate, editable) { value -> model.updateEditor(editorGeneration) { it.copy(startDate = value) } } }
+                item { EditField("分类（可选）", editor.category, editable) { value -> model.updateEditor(editorGeneration) { it.copy(category = value) } } }
+                item { EditField("备注（可选）", editor.note, editable) { value -> model.updateEditor(editorGeneration) { it.copy(note = value) } } }
                 item { Text("扣费前提醒（本地 09:00，可多选）") }
                 item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(1, 3, 7).forEach { day -> FilterChip(day in editor.reminderDays, onClick = {
-                        model.updateEditor { it.copy(reminderDays = if (day in it.reminderDays) it.reminderDays - day else it.reminderDays + day) }
-                    }, label = { Text("$day 天") }, enabled = !editor.isSaving && !editor.isLoadingReminders && editor.preferencesError == null) }
+                        model.updateEditor(editorGeneration) { it.copy(reminderDays = if (day in it.reminderDays) it.reminderDays - day else it.reminderDays + day) }
+                    }, label = { Text("$day 天") }, enabled = editable && !editor.isLoadingReminders && editor.preferencesError == null) }
                 } }
                 if (editor.isLoadingReminders) item { Text(if (editor.original == null) "正在读取新建订阅偏好…" else "正在读取提醒配置…") }
                 editor.preferencesError?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
@@ -48,26 +50,28 @@ internal fun SubscriptionEditor(editor: SubscriptionEditorState, model: Subscrip
                 editor.validationMessage?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
             }
         },
-        confirmButton = { TextButton(onClick = model::saveSubscription, enabled = !editor.isSaving && !editor.isLoadingReminders && editor.preferencesError == null) { Text("保存订阅") } },
-        dismissButton = { TextButton(onClick = model::closeEditor, enabled = !editor.isSaving) { Text("取消") } },
+        confirmButton = { TextButton(onClick = { model.saveSubscription(editorGeneration) }, enabled = editable && !editor.isLoadingReminders && editor.preferencesError == null) { Text("保存订阅") } },
+        dismissButton = { TextButton(onClick = { model.closeEditor(editorGeneration) }, enabled = !editor.isSaving) { Text("取消") } },
     )
 }
 
 @Composable
-internal fun PaymentEditor(editor: PaymentEditorState, model: SubscriptionViewModel, pendingNotificationLabel: String? = null) {
-    AlertDialog(onDismissRequest = model::closePaymentEditor, title = {
+internal fun PaymentEditor(editor: PaymentEditorState, model: SubscriptionViewModel, pendingNotificationLabel: String? = null, canMutate: Boolean = true) {
+    val editorGeneration = editor.generation
+    val editable = !editor.isSaving && canMutate
+    AlertDialog(onDismissRequest = { model.closePaymentEditor(editorGeneration) }, title = {
         EditorDialogTitle(if (editor.editingId == 0L) "记录实际扣费" else "编辑实际扣费", pendingNotificationLabel)
     },
         text = { LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            item { EditField("实际金额", editor.amount, !editor.isSaving) { value -> model.updatePaymentEditor { it.copy(amount = value) } } }
-            item { EditField("币种", editor.currency, !editor.isSaving) { value -> model.updatePaymentEditor { it.copy(currency = value) } } }
-            item { EditField("扣费日期（YYYY-MM-DD）", editor.paidAt, !editor.isSaving) { value -> model.updatePaymentEditor { it.copy(paidAt = value) } } }
-            item { EditField("扣费备注", editor.note, !editor.isSaving) { value -> model.updatePaymentEditor { it.copy(note = value) } } }
+            item { EditField("实际金额", editor.amount, editable) { value -> model.updatePaymentEditor(editorGeneration) { it.copy(amount = value) } } }
+            item { EditField("币种", editor.currency, editable) { value -> model.updatePaymentEditor(editorGeneration) { it.copy(currency = value) } } }
+            item { EditField("扣费日期（YYYY-MM-DD）", editor.paidAt, editable) { value -> model.updatePaymentEditor(editorGeneration) { it.copy(paidAt = value) } } }
+            item { EditField("扣费备注", editor.note, editable) { value -> model.updatePaymentEditor(editorGeneration) { it.copy(note = value) } } }
             item { Text("该记录只更新实际支出，不改变订阅计费日期。") }
             editor.validationMessage?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
         } },
-        confirmButton = { TextButton(onClick = model::savePayment, enabled = !editor.isSaving) { Text("保存扣费") } },
-        dismissButton = { TextButton(onClick = model::closePaymentEditor, enabled = !editor.isSaving) { Text("取消") } },
+        confirmButton = { TextButton(onClick = { model.savePayment(editorGeneration) }, enabled = editable) { Text("保存扣费") } },
+        dismissButton = { TextButton(onClick = { model.closePaymentEditor(editorGeneration) }, enabled = !editor.isSaving) { Text("取消") } },
     )
 }
 
@@ -88,14 +92,16 @@ private fun EditorDialogTitle(title: String, pendingNotificationLabel: String?) 
 
 @Composable
 internal fun SubscriptionDetail(state: SubscriptionUiState, model: SubscriptionViewModel) {
+    val renderedGeneration = state.generation
+    val canMutate = state.isAvailable && !state.isMaintaining && !state.isBusy
     val subscription = state.subscriptions.firstOrNull { it.id == state.detailId }
-    var confirm by remember(state.detailId) { mutableStateOf<String?>(null) }
-    var deletingPayment by remember(state.detailId) { mutableStateOf<Long?>(null) }
+    var confirm by remember(renderedGeneration, state.detailId) { mutableStateOf<String?>(null) }
+    var deletingPayment by remember(renderedGeneration, state.detailId) { mutableStateOf<Long?>(null) }
     if (subscription == null) {
-        AlertDialog(onDismissRequest = model::closeDetail, title = { Text("订阅详情") }, text = { Text(if (state.isLoading) "正在读取…" else "订阅不存在或已删除") }, confirmButton = { TextButton(onClick = model::closeDetail) { Text("关闭") } })
+        AlertDialog(onDismissRequest = { model.closeDetail(renderedGeneration) }, title = { Text("订阅详情") }, text = { Text(if (state.isLoading) "正在读取…" else "订阅不存在或已删除") }, confirmButton = { TextButton(onClick = { model.closeDetail(renderedGeneration) }) { Text("关闭") } })
         return
     }
-    AlertDialog(onDismissRequest = model::closeDetail, title = { Text(subscription.appName) }, text = {
+    AlertDialog(onDismissRequest = { model.closeDetail(renderedGeneration) }, title = { Text(subscription.appName) }, text = {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             state.errorMessage?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
             item { Text("${moneyText(subscription.amountMinor, subscription.currency)} / ${cycleLabel(subscription.billingCycle)}") }
@@ -105,33 +111,33 @@ internal fun SubscriptionDetail(state: SubscriptionUiState, model: SubscriptionV
             item { Text("提醒：${state.detailReminderDays.sorted().joinToString { "提前 $it 天" }.ifEmpty { "未设置" }}") }
             subscription.cancelDate?.let { day -> item { Text("取消日期：${displayDate(day)}") } }
             item { Row(Modifier.horizontalScroll(rememberScrollState())) {
-                TextButton(onClick = { model.openEditor(subscription) }, enabled = !state.isBusy) { Text("编辑") }
-                TextButton(onClick = { confirm = if (subscription.isActive) "cancel" else "restore" }, enabled = !state.isBusy) { Text(if (subscription.isActive) "取消订阅" else "恢复订阅") }
-                TextButton(onClick = { confirm = "delete" }, enabled = !state.isBusy) { Text("删除订阅") }
+                TextButton(onClick = { model.openEditor(subscription, renderedGeneration) }, enabled = canMutate) { Text("编辑") }
+                TextButton(onClick = { confirm = if (subscription.isActive) "cancel" else "restore" }, enabled = canMutate) { Text(if (subscription.isActive) "取消订阅" else "恢复订阅") }
+                TextButton(onClick = { confirm = "delete" }, enabled = canMutate) { Text("删除订阅") }
             } }
             item { Text("实际扣费历史", style = MaterialTheme.typography.titleMedium) }
-            item { TextButton(onClick = { model.openPaymentEditor(subscription.id) }, enabled = !state.isBusy) { Text("记录实际扣费") } }
+            item { TextButton(onClick = { model.openPaymentEditor(subscription.id, generation = renderedGeneration) }, enabled = canMutate) { Text("记录实际扣费") } }
             val payments = state.payments.filter { it.subscriptionId == subscription.id }.sortedWith(compareByDescending<com.example.lifemanager.domain.model.SubscriptionPayment> { it.paidAt }.thenByDescending { it.id })
             if (payments.isEmpty()) item { Text("还没有手工扣费记录") }
             payments.forEach { payment -> item {
                 Text("${displayDate(payment.paidAt)}　${moneyText(payment.amountMinor, payment.currency)}")
                 payment.note?.let { Text(it) }
                 Row {
-                    TextButton(onClick = { model.openPaymentEditor(subscription.id, payment) }, enabled = !state.isBusy) { Text("编辑扣费") }
-                    TextButton(onClick = { deletingPayment = payment.id }, enabled = !state.isBusy) { Text("删除扣费") }
+                    TextButton(onClick = { model.openPaymentEditor(subscription.id, payment, renderedGeneration) }, enabled = canMutate) { Text("编辑扣费") }
+                    TextButton(onClick = { deletingPayment = payment.id }, enabled = canMutate) { Text("删除扣费") }
                 }
             } }
         }
-    }, confirmButton = { TextButton(onClick = model::closeDetail) { Text("关闭") } })
+    }, confirmButton = { TextButton(onClick = { model.closeDetail(renderedGeneration) }) { Text("关闭") } })
     confirm?.let { action -> ConfirmAction(
         title = when (action) { "delete" -> "删除订阅？"; "cancel" -> "取消订阅？"; else -> "恢复订阅？" },
         message = when (action) { "delete" -> "订阅、全部实际扣费历史和提醒配置将被删除，无法撤销。"; "cancel" -> "停止未来提醒与预测，保留订阅和全部扣费历史。"; else -> "恢复费用预测，并按原配置重新安排未来提醒。" },
         onDismiss = { confirm = null }, onConfirm = {
-            when (action) { "delete" -> model.deleteSubscription(subscription.id); "cancel" -> model.cancelSubscription(subscription.id); else -> model.restoreSubscription(subscription.id) }
+            when (action) { "delete" -> model.deleteSubscription(subscription.id, renderedGeneration); "cancel" -> model.cancelSubscription(subscription.id, renderedGeneration); else -> model.restoreSubscription(subscription.id, renderedGeneration) }
             confirm = null
         },
     ) }
-    deletingPayment?.let { id -> ConfirmAction("删除扣费记录？", "只删除这条实际扣费记录，预计费用不会改变。", { deletingPayment = null }, { model.deletePayment(id); deletingPayment = null }) }
+    deletingPayment?.let { id -> ConfirmAction("删除扣费记录？", "只删除这条实际扣费记录，预计费用不会改变。", { deletingPayment = null }, { model.deletePayment(id, renderedGeneration); deletingPayment = null }) }
 }
 
 @Composable

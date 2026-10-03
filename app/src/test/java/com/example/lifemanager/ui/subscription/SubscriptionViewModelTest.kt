@@ -5,6 +5,7 @@ import com.example.lifemanager.domain.model.*
 import com.example.lifemanager.domain.repository.SubscriptionRepository
 import com.example.lifemanager.domain.repository.SettingsRepository
 import com.example.lifemanager.notification.SubscriptionReminderSchedulerContract
+import com.example.lifemanager.ui.common.testGenerationAccess
 import java.time.Instant
 import java.time.LocalDate
 import kotlinx.coroutines.*
@@ -169,6 +170,7 @@ class SubscriptionViewModelTest {
 
     @Test fun oldReminderFailureCannotContaminateNewEditor() = scenario { model, repository, _ ->
         repository.seed()
+        advanceUntilIdle()
         val result = CompletableDeferred<Set<Int>>()
         repository.reminderRead = { result.await() }
         model.openEditor(repository.subscriptions.value.single())
@@ -450,7 +452,7 @@ class SubscriptionViewModelTest {
         val repository = FakeRepository()
         repository.configure()
         val scheduler = RecordingScheduler()
-        val model = SubscriptionViewModel(repository, scheduler, preferences, dispatcher)
+        val model = SubscriptionViewModel(repository, scheduler, preferences, dispatcher, testGenerationAccess())
         try { advanceUntilIdle(); block(model, repository, scheduler) }
         finally { model.viewModelScope.cancel(); advanceUntilIdle(); Dispatchers.resetMain() }
     }

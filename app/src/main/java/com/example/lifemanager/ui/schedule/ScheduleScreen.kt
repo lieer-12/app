@@ -49,12 +49,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lifemanager.domain.model.Schedule
 import com.example.lifemanager.domain.model.ScheduleOccurrence
 import com.example.lifemanager.domain.model.ScheduleRepeatRule
+import com.example.lifemanager.domain.maintenance.DataGeneration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -73,6 +76,9 @@ fun ScheduleScreen(
     viewModel: ScheduleViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val renderedGeneration = state.generation
+    val editorGeneration = state.editor.generation
+    val available = state.isAvailable && !state.isMaintaining
     LaunchedEffect(initialScheduleId, notificationToken) {
         initialScheduleId?.takeIf { it > 0L }?.let { id ->
             viewModel.openNotificationDetail(id)
@@ -83,7 +89,10 @@ fun ScheduleScreen(
     Scaffold(
         topBar = { TopAppBar(title = { Text("日程") }) },
         floatingActionButton = {
-            FloatingActionButton(onClick = { viewModel.openEditor() }) {
+            FloatingActionButton(
+                onClick = { if (available) viewModel.openEditor(generation = renderedGeneration) },
+                modifier = Modifier.semantics { if (!available) disabled() },
+            ) {
                 Icon(Icons.Outlined.Add, contentDescription = "添加日程")
             }
         },
@@ -93,6 +102,7 @@ fun ScheduleScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             CalendarToolbar(state, viewModel)
+            if (state.isMaintaining) Text("正在维护数据，请稍后重试")
             state.errorMessage?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
             if (state.isLoading) Text("加载中…") else when (state.viewMode) {
                 CalendarViewMode.MONTH -> MonthCalendar(state, viewModel)
@@ -103,41 +113,46 @@ fun ScheduleScreen(
     if (state.editor.isOpen) {
         ScheduleEditorDialog(
             state = state.editor,
-            onDismiss = viewModel::closeEditor,
-            onTitleChanged = viewModel::onTitleChanged,
-            onAllDayChanged = viewModel::onAllDayChanged,
-            onStartChanged = viewModel::onStartChanged,
-            onEndChanged = viewModel::onEndChanged,
-            onAllDayDatesChanged = viewModel::onAllDayDatesChanged,
-            onLocationChanged = viewModel::onLocationChanged,
-            onParticipantsChanged = viewModel::onParticipantsChanged,
-            onNoteChanged = viewModel::onNoteChanged,
-            onColorChanged = viewModel::onColorChanged,
-            onReminderChanged = viewModel::onReminderChanged,
-            onRepeatRuleChanged = viewModel::onRepeatRuleChanged,
-            onSave = viewModel::saveSchedule,
-            onConfirmConflict = viewModel::confirmSaveDespiteConflicts,
-            onDelete = viewModel::deleteSchedule,
+            enabled = available,
+            onDismiss = { viewModel.closeEditor(editorGeneration) },
+            onTitleChanged = { viewModel.onTitleChanged(it, editorGeneration) },
+            onAllDayChanged = { viewModel.onAllDayChanged(it, editorGeneration) },
+            onStartChanged = { viewModel.onStartChanged(it, editorGeneration) },
+            onEndChanged = { viewModel.onEndChanged(it, editorGeneration) },
+            onAllDayDatesChanged = { start, end -> viewModel.onAllDayDatesChanged(start, end, editorGeneration) },
+            onLocationChanged = { viewModel.onLocationChanged(it, editorGeneration) },
+            onParticipantsChanged = { viewModel.onParticipantsChanged(it, editorGeneration) },
+            onNoteChanged = { viewModel.onNoteChanged(it, editorGeneration) },
+            onColorChanged = { viewModel.onColorChanged(it, editorGeneration) },
+            onReminderChanged = { viewModel.onReminderChanged(it, editorGeneration) },
+            onRepeatRuleChanged = { viewModel.onRepeatRuleChanged(it, editorGeneration) },
+            onSave = { viewModel.saveSchedule(generation = editorGeneration) },
+            onConfirmConflict = { viewModel.confirmSaveDespiteConflicts(editorGeneration) },
+            onDelete = { viewModel.deleteSchedule(it, editorGeneration) },
         )
     }
 }
 
 @Composable
 private fun CalendarToolbar(state: ScheduleUiState, viewModel: ScheduleViewModel) {
+    val renderedGeneration = state.generation
+    val available = state.isAvailable && !state.isMaintaining
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        IconButton(onClick = viewModel::previousPeriod) { Icon(Icons.Outlined.ChevronLeft, "上一段") }
+        IconButton(onClick = { viewModel.previousPeriod(renderedGeneration) }, enabled = available) { Icon(Icons.Outlined.ChevronLeft, "上一段") }
         Text(periodTitle(state), modifier = Modifier.weight(1f), style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
-        IconButton(onClick = viewModel::nextPeriod) { Icon(Icons.Outlined.ChevronRight, "下一段") }
+        IconButton(onClick = { viewModel.nextPeriod(renderedGeneration) }, enabled = available) { Icon(Icons.Outlined.ChevronRight, "下一段") }
     }
     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         CalendarViewMode.entries.forEach { mode ->
-            FilterChip(selected = state.viewMode == mode, onClick = { viewModel.selectViewMode(mode) }, label = { Text(mode.label()) })
+            FilterChip(selected = state.viewMode == mode, onClick = { viewModel.selectViewMode(mode, renderedGeneration) }, enabled = available, label = { Text(mode.label()) })
         }
     }
 }
 
 @Composable
 private fun MonthCalendar(state: ScheduleUiState, viewModel: ScheduleViewModel) {
+    val renderedGeneration = state.generation
+    val available = state.isAvailable && !state.isMaintaining
     val month = YearMonth.from(state.selectedDate)
     Row(modifier = Modifier.fillMaxWidth()) {
         listOf("一", "二", "三", "四", "五", "六", "日").forEach { label ->
@@ -152,7 +167,7 @@ private fun MonthCalendar(state: ScheduleUiState, viewModel: ScheduleViewModel) 
                 Box(
                     modifier = Modifier.weight(1f).height(54.dp).padding(2.dp)
                         .background(if (date == state.selectedDate) androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-                        .clickable(enabled = date != null) { date?.let { viewModel.selectDate(it, switchToDay = true) } },
+                        .clickable(enabled = date != null && available) { date?.let { viewModel.selectDate(it, switchToDay = true, generation = renderedGeneration) } },
                 ) {
                     if (date != null) {
                         Column(modifier = Modifier.padding(5.dp)) {
@@ -167,7 +182,7 @@ private fun MonthCalendar(state: ScheduleUiState, viewModel: ScheduleViewModel) 
         }
     }
     Text("本月日程", style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
-    OccurrenceCards(state.occurrences, viewModel)
+    OccurrenceCards(state.occurrences, viewModel, renderedGeneration, available)
 }
 
 @Composable
@@ -175,14 +190,14 @@ private fun OccurrenceList(state: ScheduleUiState, viewModel: ScheduleViewModel)
     if (state.occurrences.isEmpty()) {
         Text("这段时间没有日程，点击右下角添加")
     } else {
-        OccurrenceCards(state.occurrences, viewModel)
+        OccurrenceCards(state.occurrences, viewModel, state.generation, state.isAvailable && !state.isMaintaining)
     }
 }
 
 @Composable
-private fun OccurrenceCards(occurrences: List<ScheduleOccurrence>, viewModel: ScheduleViewModel) {
+private fun OccurrenceCards(occurrences: List<ScheduleOccurrence>, viewModel: ScheduleViewModel, renderedGeneration: DataGeneration?, enabled: Boolean) {
     occurrences.forEach { occurrence ->
-        Card(modifier = Modifier.fillMaxWidth().clickable { viewModel.openEditor(occurrence.source) }) {
+        Card(modifier = Modifier.fillMaxWidth().clickable(enabled = enabled) { viewModel.openEditor(occurrence.source, renderedGeneration) }) {
             Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(12.dp).background(Color(occurrence.color)))
                 Spacer(Modifier.width(10.dp))
@@ -200,6 +215,7 @@ private fun OccurrenceCards(occurrences: List<ScheduleOccurrence>, viewModel: Sc
 @Composable
 private fun ScheduleEditorDialog(
     state: ScheduleEditorState,
+    enabled: Boolean,
     onDismiss: () -> Unit,
     onTitleChanged: (String) -> Unit,
     onAllDayChanged: (Boolean) -> Unit,
@@ -216,41 +232,42 @@ private fun ScheduleEditorDialog(
     onConfirmConflict: () -> Unit,
     onDelete: (Long) -> Unit,
 ) {
-    var pickerTarget by remember { mutableStateOf<PickerTarget?>(null) }
-    LaunchedEffect(state.isSaving) { if (state.isSaving) pickerTarget = null }
+    var pickerTarget by remember(state.generation) { mutableStateOf<PickerTarget?>(null) }
+    val isBlocked = state.isSaving || !enabled
+    LaunchedEffect(isBlocked) { if (isBlocked) pickerTarget = null }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (state.editingId == null) "新建日程" else "编辑日程") },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = state.title, onValueChange = onTitleChanged, label = { Text("标题") }, singleLine = true, enabled = !state.isSaving)
+                OutlinedTextField(value = state.title, onValueChange = onTitleChanged, label = { Text("标题") }, singleLine = true, enabled = !isBlocked)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = state.isAllDay, onCheckedChange = onAllDayChanged, enabled = !state.isSaving)
+                    Checkbox(checked = state.isAllDay, onCheckedChange = onAllDayChanged, enabled = !isBlocked)
                     Text("全天事件")
                 }
                 if (state.isAllDay) {
-                    DateLine("开始日期", state.allDayStartDate, { pickerTarget = PickerTarget.ALL_DAY_START }, enabled = !state.isSaving)
-                    DateLine("结束日期", state.allDayEndDate, { pickerTarget = PickerTarget.ALL_DAY_END }, enabled = !state.isSaving)
+                    DateLine("开始日期", state.allDayStartDate, { pickerTarget = PickerTarget.ALL_DAY_START }, enabled = !isBlocked)
+                    DateLine("结束日期", state.allDayEndDate, { pickerTarget = PickerTarget.ALL_DAY_END }, enabled = !isBlocked)
                 } else {
-                    DateLine("开始日期", state.startAt?.atZone(ZoneId.systemDefault())?.toLocalDate(), { pickerTarget = PickerTarget.START_DATE }, enabled = !state.isSaving)
-                    DateLine("结束日期", state.endAt?.atZone(ZoneId.systemDefault())?.toLocalDate(), { pickerTarget = PickerTarget.END_DATE }, enabled = !state.isSaving)
-                    TimeLine("开始时间", state.startAt, { pickerTarget = PickerTarget.START_TIME }, enabled = !state.isSaving)
-                    TimeLine("结束时间", state.endAt, { pickerTarget = PickerTarget.END_TIME }, enabled = !state.isSaving)
+                    DateLine("开始日期", state.startAt?.atZone(ZoneId.systemDefault())?.toLocalDate(), { pickerTarget = PickerTarget.START_DATE }, enabled = !isBlocked)
+                    DateLine("结束日期", state.endAt?.atZone(ZoneId.systemDefault())?.toLocalDate(), { pickerTarget = PickerTarget.END_DATE }, enabled = !isBlocked)
+                    TimeLine("开始时间", state.startAt, { pickerTarget = PickerTarget.START_TIME }, enabled = !isBlocked)
+                    TimeLine("结束时间", state.endAt, { pickerTarget = PickerTarget.END_TIME }, enabled = !isBlocked)
                 }
-                OutlinedTextField(value = state.location, onValueChange = onLocationChanged, label = { Text("地点") }, enabled = !state.isSaving)
-                OutlinedTextField(value = state.participants, onValueChange = onParticipantsChanged, label = { Text("参与者（文本）") }, enabled = !state.isSaving)
-                OutlinedTextField(value = state.note, onValueChange = onNoteChanged, label = { Text("备注") }, enabled = !state.isSaving)
-                OutlinedTextField(value = state.reminderMinutes, onValueChange = onReminderChanged, label = { Text("提前提醒分钟（留空关闭）") }, singleLine = true, enabled = !state.isSaving)
+                OutlinedTextField(value = state.location, onValueChange = onLocationChanged, label = { Text("地点") }, enabled = !isBlocked)
+                OutlinedTextField(value = state.participants, onValueChange = onParticipantsChanged, label = { Text("参与者（文本）") }, enabled = !isBlocked)
+                OutlinedTextField(value = state.note, onValueChange = onNoteChanged, label = { Text("备注") }, enabled = !isBlocked)
+                OutlinedTextField(value = state.reminderMinutes, onValueChange = onReminderChanged, label = { Text("提前提醒分钟（留空关闭）") }, singleLine = true, enabled = !isBlocked)
                 Text("重复")
                 Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     ScheduleRepeatRule.entries.forEach { rule ->
-                        FilterChip(selected = state.repeatRule == rule, onClick = { onRepeatRuleChanged(rule) }, label = { Text(rule.label()) }, enabled = !state.isSaving)
+                        FilterChip(selected = state.repeatRule == rule, onClick = { onRepeatRuleChanged(rule) }, label = { Text(rule.label()) }, enabled = !isBlocked)
                     }
                 }
                 Text("颜色")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(0xFF00695C.toInt(), 0xFF3F51B5.toInt(), 0xFFC62828.toInt(), 0xFFEF6C00.toInt()).forEach { color ->
-                        AssistChip(onClick = { onColorChanged(color) }, label = { Text(if (state.color == color) "已选" else "颜色") }, leadingIcon = { Box(Modifier.size(10.dp).background(Color(color))) }, enabled = !state.isSaving)
+                        AssistChip(onClick = { onColorChanged(color) }, label = { Text(if (state.color == color) "已选" else "颜色") }, leadingIcon = { Box(Modifier.size(10.dp).background(Color(color))) }, enabled = !isBlocked)
                     }
                 }
                 state.validationMessage?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
@@ -258,14 +275,14 @@ private fun ScheduleEditorDialog(
             }
         },
         confirmButton = {
-            Button(onClick = if (state.awaitingConflictConfirmation) onConfirmConflict else onSave, enabled = !state.isSaving) {
+            Button(onClick = if (state.awaitingConflictConfirmation) onConfirmConflict else onSave, enabled = !isBlocked) {
                 Text(if (state.awaitingConflictConfirmation) "仍然保存" else "保存")
             }
         },
         dismissButton = {
             Row {
-                if (state.editingId != null) TextButton(onClick = { onDelete(state.editingId) }, enabled = !state.isSaving) { Text("删除") }
-                TextButton(onClick = onDismiss, enabled = !state.isSaving) { Text("取消") }
+                if (state.editingId != null) TextButton(onClick = { onDelete(state.editingId) }, enabled = !isBlocked) { Text("删除") }
+                TextButton(onClick = onDismiss, enabled = !isBlocked) { Text("取消") }
             }
         },
     )

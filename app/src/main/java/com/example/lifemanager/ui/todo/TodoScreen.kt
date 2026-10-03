@@ -44,9 +44,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
@@ -72,6 +75,10 @@ fun TodoScreen(
     viewModel: TodoViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val renderedGeneration = state.generation
+    val editorGeneration = state.editor.generation
+    val controlsEnabled = state.isAvailable && !state.isMaintaining
+    val renderedFilter = state.filter
     var showSearch by remember { mutableStateOf(false) }
     LaunchedEffect(initialTodoId, notificationToken) {
         initialTodoId?.let(viewModel::openNotificationDetail)
@@ -91,7 +98,10 @@ fun TodoScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { viewModel.openEditor() }) {
+            FloatingActionButton(
+                modifier = Modifier.semantics { if (!controlsEnabled) disabled() },
+                onClick = { if (controlsEnabled) viewModel.openEditor(generation = renderedGeneration) },
+            ) {
                 Icon(Icons.Outlined.Add, contentDescription = "添加待办")
             }
         },
@@ -100,19 +110,21 @@ fun TodoScreen(
             if (showSearch) {
                 OutlinedTextField(
                     value = state.filter.query,
-                    onValueChange = { viewModel.onFilterChanged(state.filter.copy(query = it)) },
+                    onValueChange = { viewModel.onFilterChanged(renderedFilter.copy(query = it), renderedGeneration) },
+                    enabled = controlsEnabled,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     label = { Text("搜索标题或备注") },
                     singleLine = true,
                 )
             }
             StatsHeader(state)
-            DateFilters(state.filter, viewModel::onFilterChanged)
-            PriorityFilters(state.filter, viewModel::onFilterChanged)
+            DateFilters(state.filter, controlsEnabled) { viewModel.onFilterChanged(it, renderedGeneration) }
+            PriorityFilters(state.filter, controlsEnabled) { viewModel.onFilterChanged(it, renderedGeneration) }
             if (state.tags.isNotEmpty()) {
-                TagFilters(state, viewModel::onFilterChanged)
+                TagFilters(state, controlsEnabled) { viewModel.onFilterChanged(it, renderedGeneration) }
             }
             Spacer(Modifier.height(8.dp))
+            if (state.isMaintaining) Text("正在维护数据，请稍后重试")
             state.errorMessage?.let { error ->
                 Text(error, color = androidx.compose.material3.MaterialTheme.colorScheme.error)
             }
@@ -128,9 +140,10 @@ fun TodoScreen(
                     items(state.todos, key = Todo::id) { todo ->
                         TodoRow(
                             todo = todo,
-                            onToggle = { viewModel.toggleTodo(todo) },
-                            onDelete = { viewModel.deleteTodo(todo.id) },
-                            onEdit = { viewModel.openEditor(todo) },
+                            enabled = controlsEnabled,
+                            onToggle = { viewModel.toggleTodo(todo, renderedGeneration) },
+                            onDelete = { viewModel.deleteTodo(todo.id, renderedGeneration) },
+                            onEdit = { viewModel.openEditor(todo, renderedGeneration) },
                         )
                     }
                 }
@@ -139,16 +152,19 @@ fun TodoScreen(
     }
 
     if (state.editor.isOpen) {
-        TodoEditorDialog(
-            state = state.editor,
-            onDismiss = viewModel::closeEditor,
-            onTitleChanged = viewModel::onTitleChanged,
-            onDescriptionChanged = viewModel::onDescriptionChanged,
-            onPriorityChanged = viewModel::onPriorityChanged,
-            onDueAtChanged = viewModel::onDueAtChanged,
-            onTagInputChanged = viewModel::onTagInputChanged,
-            onSave = viewModel::saveTodo,
-        )
+        key(editorGeneration) {
+            TodoEditorDialog(
+                state = state.editor,
+                enabled = controlsEnabled,
+                onDismiss = { viewModel.closeEditor(editorGeneration) },
+                onTitleChanged = { viewModel.onTitleChanged(it, editorGeneration) },
+                onDescriptionChanged = { viewModel.onDescriptionChanged(it, editorGeneration) },
+                onPriorityChanged = { viewModel.onPriorityChanged(it, editorGeneration) },
+                onDueAtChanged = { viewModel.onDueAtChanged(it, editorGeneration) },
+                onTagInputChanged = { viewModel.onTagInputChanged(it, editorGeneration) },
+                onSave = { viewModel.saveTodo(editorGeneration) },
+            )
+        }
     }
 }
 
@@ -161,7 +177,7 @@ private fun StatsHeader(state: TodoUiState) {
 }
 
 @Composable
-private fun DateFilters(filter: TodoFilter, onChanged: (TodoFilter) -> Unit) {
+private fun DateFilters(filter: TodoFilter, enabled: Boolean, onChanged: (TodoFilter) -> Unit) {
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -174,6 +190,7 @@ private fun DateFilters(filter: TodoFilter, onChanged: (TodoFilter) -> Unit) {
         ).forEach { (dateFilter, label) ->
             FilterChip(
                 selected = filter.dateFilter == dateFilter,
+                enabled = enabled,
                 onClick = { onChanged(filter.copy(dateFilter = dateFilter)) },
                 label = { Text(label) },
             )
@@ -182,19 +199,21 @@ private fun DateFilters(filter: TodoFilter, onChanged: (TodoFilter) -> Unit) {
 }
 
 @Composable
-private fun PriorityFilters(filter: TodoFilter, onChanged: (TodoFilter) -> Unit) {
+private fun PriorityFilters(filter: TodoFilter, enabled: Boolean, onChanged: (TodoFilter) -> Unit) {
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         FilterChip(
             selected = filter.priority == null,
+            enabled = enabled,
             onClick = { onChanged(filter.copy(priority = null)) },
             label = { Text("全部优先级") },
         )
         TodoPriority.values().filter { it != TodoPriority.NONE }.forEach { priority ->
             FilterChip(
                 selected = filter.priority == priority,
+                enabled = enabled,
                 onClick = { onChanged(filter.copy(priority = priority)) },
                 label = { Text(priority.label()) },
             )
@@ -203,20 +222,23 @@ private fun PriorityFilters(filter: TodoFilter, onChanged: (TodoFilter) -> Unit)
 }
 
 @Composable
-private fun TagFilters(state: TodoUiState, onChanged: (TodoFilter) -> Unit) {
+private fun TagFilters(state: TodoUiState, enabled: Boolean, onChanged: (TodoFilter) -> Unit) {
+    val filter = state.filter
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         FilterChip(
             selected = state.filter.tagId == null,
-            onClick = { onChanged(state.filter.copy(tagId = null)) },
+            onClick = { onChanged(filter.copy(tagId = null)) },
+            enabled = enabled,
             label = { Text("全部标签") },
         )
         state.tags.forEach { tag ->
             FilterChip(
                 selected = state.filter.tagId == tag.id,
-                onClick = { onChanged(state.filter.copy(tagId = tag.id)) },
+                onClick = { onChanged(filter.copy(tagId = tag.id)) },
+                enabled = enabled,
                 label = { Text(tag.name) },
             )
         }
@@ -224,13 +246,13 @@ private fun TagFilters(state: TodoUiState, onChanged: (TodoFilter) -> Unit) {
 }
 
 @Composable
-private fun TodoRow(todo: Todo, onToggle: () -> Unit, onDelete: () -> Unit, onEdit: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit)) {
+private fun TodoRow(todo: Todo, enabled: Boolean, onToggle: () -> Unit, onDelete: () -> Unit, onEdit: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onEdit)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Checkbox(checked = todo.isCompleted, onCheckedChange = { onToggle() })
+            Checkbox(checked = todo.isCompleted, onCheckedChange = { onToggle() }, enabled = enabled)
             Spacer(Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(todo.title)
@@ -241,7 +263,7 @@ private fun TodoRow(todo: Todo, onToggle: () -> Unit, onDelete: () -> Unit, onEd
                 }
                 if (metadata.isNotEmpty()) Text(metadata.joinToString(" · "))
             }
-            IconButton(onClick = onDelete) {
+            IconButton(onClick = onDelete, enabled = enabled) {
                 Icon(Icons.Outlined.Delete, contentDescription = "删除")
             }
         }
@@ -259,6 +281,7 @@ private fun EmptyTodoState(modifier: Modifier = Modifier) {
 @Composable
 private fun TodoEditorDialog(
     state: TodoEditorState,
+    enabled: Boolean,
     onDismiss: () -> Unit,
     onTitleChanged: (String) -> Unit,
     onDescriptionChanged: (String) -> Unit,
@@ -267,6 +290,7 @@ private fun TodoEditorDialog(
     onTagInputChanged: (String) -> Unit,
     onSave: () -> Unit,
 ) {
+    val editingEnabled = enabled && !state.isSaving
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
     AlertDialog(
@@ -279,6 +303,7 @@ private fun TodoEditorDialog(
             ) {
                 OutlinedTextField(
                     value = state.title,
+                    enabled = editingEnabled,
                     onValueChange = onTitleChanged,
                     label = { Text("标题") },
                     singleLine = true,
@@ -286,6 +311,7 @@ private fun TodoEditorDialog(
                 )
                 OutlinedTextField(
                     value = state.description,
+                    enabled = editingEnabled,
                     onValueChange = onDescriptionChanged,
                     label = { Text("备注") },
                 )
@@ -294,6 +320,7 @@ private fun TodoEditorDialog(
                     TodoPriority.values().forEach { priority ->
                         FilterChip(
                             selected = state.priority == priority,
+                            enabled = editingEnabled,
                             onClick = { onPriorityChanged(priority) },
                             label = { Text(priority.label()) },
                         )
@@ -301,22 +328,23 @@ private fun TodoEditorDialog(
                 }
                 OutlinedTextField(
                     value = state.tagInput,
+                    enabled = editingEnabled,
                     onValueChange = onTagInputChanged,
                     label = { Text("标签（用逗号分隔）") },
                     supportingText = { Text("保存后会转换为独立标签记录") },
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(state.dueAt?.let { displayDateTime(it) } ?: "未设置截止日期", modifier = Modifier.weight(1f))
-                    TextButton(onClick = { showDatePicker = true }) { Text("日期") }
-                    TextButton(onClick = { showTimePicker = true }) { Text("时间") }
-                    if (state.dueAt != null) TextButton(onClick = { onDueAtChanged(null) }) { Text("清除") }
+                    TextButton(onClick = { showDatePicker = true }, enabled = editingEnabled) { Text("日期") }
+                    TextButton(onClick = { showTimePicker = true }, enabled = editingEnabled) { Text("时间") }
+                    if (state.dueAt != null) TextButton(onClick = { onDueAtChanged(null) }, enabled = editingEnabled) { Text("清除") }
                 }
                 state.validationMessage?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
                 if (state.pendingNotificationId != null) Text("通知待办等待查看；保存或关闭当前草稿后打开")
             }
         },
-        confirmButton = { Button(onClick = onSave, enabled = !state.isSaving) { Text("保存") } },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !state.isSaving) { Text("取消") } },
+        confirmButton = { Button(onClick = onSave, enabled = editingEnabled) { Text("保存") } },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = editingEnabled) { Text("取消") } },
     )
 
     if (showDatePicker) {
@@ -326,7 +354,7 @@ private fun TodoEditorDialog(
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(enabled = editingEnabled, onClick = {
                     pickerState.selectedDateMillis?.let { millis ->
                         val date = Instant.ofEpochMilli(millis).atZone(ZoneId.of("UTC")).toLocalDate()
                         val time = state.dueAt?.atZone(ZoneId.systemDefault())?.toLocalTime() ?: LocalTime.of(18, 0)
@@ -349,7 +377,7 @@ private fun TodoEditorDialog(
         AlertDialog(
             onDismissRequest = { showTimePicker = false },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(enabled = editingEnabled, onClick = {
                     val date = state.dueAt?.atZone(ZoneId.systemDefault())?.toLocalDate() ?: java.time.LocalDate.now()
                     onDueAtChanged(date.atTime(pickerState.hour, pickerState.minute).atZone(ZoneId.systemDefault()).toInstant())
                     showTimePicker = false

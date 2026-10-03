@@ -3,232 +3,397 @@ package com.example.lifemanager.ui.schedule
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lifemanager.di.IoDispatcher
+import com.example.lifemanager.domain.maintenance.DataGeneration
+import com.example.lifemanager.domain.maintenance.MaintenanceBusyException
+import com.example.lifemanager.domain.maintenance.MaintenanceState
+import com.example.lifemanager.domain.maintenance.StaleGenerationException
 import com.example.lifemanager.domain.model.Schedule
 import com.example.lifemanager.domain.model.ScheduleRepeatRule
 import com.example.lifemanager.domain.repository.ScheduleRepository
-import com.example.lifemanager.domain.usecase.ScheduleRules
 import com.example.lifemanager.domain.usecase.ScheduleOperationCoordinator
+import com.example.lifemanager.domain.usecase.ScheduleRules
 import com.example.lifemanager.notification.ScheduleReminderSchedulerContract
+import com.example.lifemanager.ui.common.GenerationAccess
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 import javax.inject.Inject
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.yield
 
 @HiltViewModel
 class ScheduleViewModel @Inject constructor(
     private val repository: ScheduleRepository,
     private val reminderScheduler: ScheduleReminderSchedulerContract,
     @param:IoDispatcher private val dispatcher: CoroutineDispatcher,
+    private val access: GenerationAccess,
 ) : ViewModel() {
-    private val selectedDate = MutableStateFlow(LocalDate.now())
-    private val viewMode = MutableStateFlow(CalendarViewMode.MONTH)
-    private val editor = MutableStateFlow(ScheduleEditorState())
-    private val errorMessage = MutableStateFlow<String?>(null)
-    private val notificationGeneration = AtomicLong()
-    private val schedules = repository.observeSchedules().catch { error ->
-        errorMessage.value = "读取日程失败：${error.message ?: "未知错误"}"
-        emit(emptyList())
-    }
+    private val state = MutableStateFlow(ScheduleUiState())
+    val uiState = state.asStateFlow()
+    // Main owns all published state and notification ordering.
+    private var observedGeneration: DataGeneration? = null
+    private var notificationSequence = 0L
+    private var activeEditorOperation: Any? = null
 
-    val uiState: StateFlow<ScheduleUiState> = combine(schedules, selectedDate, viewMode, editor, errorMessage) {
-            scheduleList, date, mode, editorState, error ->
-        val (start, end) = visibleRange(date, mode)
-        val occurrences = scheduleList.flatMap { schedule ->
-            ScheduleRules.occurrencesInRange(schedule, start, end)
+    init {
+        viewModelScope.launch {
+            access.maintenance.collect { phase ->
+                state.update { it.copy(isMaintaining = phase != MaintenanceState.IDLE) }
+            }
         }
-        ScheduleUiState(
-            schedules = scheduleList,
-            occurrences = occurrences,
-            selectedDate = date,
-            viewMode = mode,
-            editor = editorState,
-            errorMessage = error,
-            isLoading = false,
-        )
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, ScheduleUiState())
-
-    fun selectDate(date: LocalDate, switchToDay: Boolean = false) {
-        selectedDate.value = date
-        if (switchToDay) viewMode.value = CalendarViewMode.DAY
+        viewModelScope.launch(dispatcher) {
+            var listenerGeneration: DataGeneration? = null
+            try {
+                access.generations.collectLatest { generation ->
+                    listenerGeneration = generation
+                    withContext(Dispatchers.Main.immediate) {
+                        if (observedGeneration != null && observedGeneration != generation) invalidateSnapshot()
+                        observedGeneration = generation
+                    }
+                    access.maintenance.collectLatest { phase ->
+                        if (phase == MaintenanceState.IDLE) {
+                            try {
+                                // Room emissions only invalidate; perform a fresh finite query under admission.
+                                repository.observeSchedules().collect {
+                                    access.read({ repository.getSchedules() }) { token, fresh -> publishSnapshot(token, fresh) }
+                                }
+                            } catch (error: Exception) {
+                                if (error is CancellationException) throw error
+                                reportFailure(generation, "读取日程失败", error, unavailable = true)
+                            }
+                        }
+                    }
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                val failedGeneration = listenerGeneration
+                withContext(Dispatchers.Main.immediate) { generationReadFailed(failedGeneration) }
+            }
+        }
     }
 
-    fun selectViewMode(mode: CalendarViewMode) { viewMode.value = mode }
-    fun previousPeriod() = movePeriod(-1)
-    fun nextPeriod() = movePeriod(1)
+    fun selectDate(date: LocalDate, switchToDay: Boolean = false, generation: DataGeneration? = state.value.generation) {
+        if (!canUsePage(generation)) return
+        recompose(state.value.copy(selectedDate = date, viewMode = if (switchToDay) CalendarViewMode.DAY else state.value.viewMode))
+    }
 
-    fun openEditor(schedule: Schedule? = null) {
-        if (editor.value.isSaving) return
+    fun selectViewMode(mode: CalendarViewMode, generation: DataGeneration? = state.value.generation) {
+        if (canUsePage(generation)) recompose(state.value.copy(viewMode = mode))
+    }
+    fun previousPeriod(generation: DataGeneration? = state.value.generation) = movePeriod(-1, generation)
+    fun nextPeriod(generation: DataGeneration? = state.value.generation) = movePeriod(1, generation)
+
+    fun openEditor(schedule: Schedule? = null, generation: DataGeneration? = state.value.generation) {
+        if (!canUsePage(generation) || state.value.editor.isSaving) return
+        val token = eventToken(generation) ?: return
+        if (schedule != null && state.value.schedules.none { it == schedule }) return
+        openAdmittedEditor(schedule, token)
+    }
+
+    private fun openAdmittedEditor(schedule: Schedule?, generation: DataGeneration) {
         val zone = ZoneId.systemDefault()
-        val defaultStart = selectedDate.value.atTime(9, 0).atZone(zone).toInstant()
-        editor.value = ScheduleEditorState(
-            isOpen = true,
-            editingId = schedule?.id,
-            title = schedule?.title.orEmpty(),
-            isAllDay = schedule?.isAllDay ?: false,
-            startAt = schedule?.startAt ?: defaultStart,
-            endAt = schedule?.endAt ?: defaultStart.plusSeconds(60 * 60),
-            allDayStartDate = schedule?.allDayStartDate ?: selectedDate.value,
-            allDayEndDate = schedule?.allDayEndDate ?: selectedDate.value,
-            location = schedule?.location.orEmpty(),
-            participants = schedule?.participants.orEmpty(),
-            note = schedule?.note.orEmpty(),
-            color = schedule?.color ?: 0xFF00695C.toInt(),
+        val date = state.value.selectedDate
+        val defaultStart = date.atTime(9, 0).atZone(zone).toInstant()
+        state.update { it.copy(editor = ScheduleEditorState(
+            generation = generation, isOpen = true, editingId = schedule?.id,
+            title = schedule?.title.orEmpty(), isAllDay = schedule?.isAllDay ?: false,
+            startAt = schedule?.startAt ?: defaultStart, endAt = schedule?.endAt ?: defaultStart.plusSeconds(60 * 60),
+            allDayStartDate = schedule?.allDayStartDate ?: date, allDayEndDate = schedule?.allDayEndDate ?: date,
+            location = schedule?.location.orEmpty(), participants = schedule?.participants.orEmpty(),
+            note = schedule?.note.orEmpty(), color = schedule?.color ?: 0xFF00695C.toInt(),
             reminderMinutes = schedule?.reminderMinutes?.toString().orEmpty(),
             repeatRule = schedule?.repeatRule ?: ScheduleRepeatRule.NONE,
-        )
+        )) }
     }
 
-    fun closeEditor() {
-        if (editor.value.isSaving) return
-        drainNotification(editor.getAndUpdate { ScheduleEditorState() })
+    fun closeEditor(generation: DataGeneration? = state.value.editor.generation) {
+        val previous = state.value.editor
+        if (!previous.isOpen || previous.isSaving || generation == null || previous.generation != generation ||
+            generation != state.value.generation || access.maintenance.value != MaintenanceState.IDLE) return
+        state.update { it.copy(editor = ScheduleEditorState()) }
+        drainNotification(previous)
     }
 
     fun openNotificationDetail(id: Long) {
         if (id <= 0L) return
-        val token = notificationGeneration.incrementAndGet()
-        val previous = editor.getAndUpdate {
-            if (it.isOpen) it.copy(pendingNotificationId = id, pendingNotificationToken = token) else it
+        val sequence = ++notificationSequence
+        val generation = state.value.generation
+        if (generation != null) {
+            if (state.value.editor.isOpen) deferNotification(id, sequence, generation)
+            else loadNotificationDetail(id, sequence, generation)
+        } else {
+            val observedAtArrival = observedGeneration
+            // Enter capture's counted admission at arrival, before the first coroutine suspension.
+            // Capture is finite; subsequent lookup keeps its token and never captures a newer one.
+            viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    val token = access.capture()
+                    if (sequence != notificationSequence) return@launch
+                    if (state.value.editor.isOpen) deferNotification(id, sequence, token)
+                    else loadNotificationDetail(id, sequence, token)
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                    if (error is MaintenanceBusyException || error is StaleGenerationException) return@launch
+                    if (sequence == notificationSequence) generationReadFailed(observedAtArrival)
+                }
+            }
         }
-        if (!previous.isOpen) loadNotificationDetail(id, token)
+    }
+
+    private fun deferNotification(id: Long, sequence: Long, generation: DataGeneration) {
+        state.update { it.copy(editor = it.editor.copy(pendingNotificationId = id,
+            pendingNotificationToken = sequence, pendingNotificationGeneration = generation)) }
     }
 
     private fun drainNotification(previous: ScheduleEditorState) {
         val id = previous.pendingNotificationId ?: return
-        val token = previous.pendingNotificationToken ?: return
-        loadNotificationDetail(id, token)
+        val sequence = previous.pendingNotificationToken ?: return
+        val generation = previous.pendingNotificationGeneration ?: return
+        loadNotificationDetail(id, sequence, generation)
     }
 
-    private fun loadNotificationDetail(id: Long, token: Long) {
-        if (token != notificationGeneration.get()) return
-        viewModelScope.launch {
+    private fun loadNotificationDetail(id: Long, sequence: Long, token: DataGeneration) {
+        if (sequence != notificationSequence) return
+        viewModelScope.launch(dispatcher) {
             try {
-                val target = withContext(dispatcher) { repository.getSchedules().firstOrNull { it.id == id } }
-                if (token != notificationGeneration.get()) return@launch
-                val previous = editor.getAndUpdate {
-                    if (it.isOpen) it.copy(pendingNotificationId = id, pendingNotificationToken = token) else it
+                while (true) {
+                    try {
+                        access.run(token) {
+                            val latest = repository.getSchedules()
+                            withContext(Dispatchers.Main.immediate) { deliverNotification(id, sequence, token, latest) }
+                        }
+                        break
+                    } catch (_: MaintenanceBusyException) {
+                        // Read-only waiting preserves the original token even if maintenance commits.
+                        access.maintenance.first { it == MaintenanceState.IDLE }
+                        yield()
+                    }
                 }
-                if (previous.isOpen) return@launch
-                if (target == null) errorMessage.value = "通知对应的日程已删除或不存在"
-                else openEditor(target)
-            } catch (error: CancellationException) { throw error }
-            catch (error: Exception) {
-                if (token == notificationGeneration.get()) errorMessage.value = "读取通知日程失败：${error.message ?: "未知错误"}"
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                reportFailure(token, "读取通知日程失败", error, sequence = sequence)
             }
         }
     }
-    fun onTitleChanged(value: String) = updateEditor { it.copy(title = value, validationMessage = null) }
-    fun onAllDayChanged(value: Boolean) = updateEditor { it.copy(isAllDay = value, validationMessage = null) }
-    fun onStartChanged(value: Instant) = updateEditor { it.copy(startAt = value, validationMessage = null) }
-    fun onEndChanged(value: Instant) = updateEditor { it.copy(endAt = value, validationMessage = null) }
-    fun onAllDayDatesChanged(start: LocalDate, end: LocalDate) = updateEditor { it.copy(allDayStartDate = start, allDayEndDate = end, validationMessage = null) }
-    fun onLocationChanged(value: String) = updateEditor { it.copy(location = value) }
-    fun onParticipantsChanged(value: String) = updateEditor { it.copy(participants = value) }
-    fun onNoteChanged(value: String) = updateEditor { it.copy(note = value) }
-    fun onColorChanged(value: Int) = updateEditor { it.copy(color = value) }
-    fun onReminderChanged(value: String) = updateEditor { it.copy(reminderMinutes = value) }
-    fun onRepeatRuleChanged(value: ScheduleRepeatRule) = updateEditor { it.copy(repeatRule = value) }
 
-    fun saveSchedule(force: Boolean = false) {
-        val current = editor.value
-        if (!current.isOpen || current.isSaving || (force && !current.awaitingConflictConfirmation)) return
-        errorMessage.value = null
+    private fun deliverNotification(id: Long, sequence: Long, generation: DataGeneration, latest: List<Schedule>) {
+        if (sequence != notificationSequence) return
+        publishSnapshot(generation, latest, keepNotification = sequence)
+        if (sequence != notificationSequence) return
+        if (state.value.editor.isOpen) {
+            deferNotification(id, sequence, generation)
+            return
+        }
+        val target = latest.firstOrNull { it.id == id }
+        if (target == null) state.update { it.copy(errorMessage = "通知对应的日程已删除或不存在") }
+        else openAdmittedEditor(target, generation)
+    }
+
+    fun onTitleChanged(value: String, generation: DataGeneration? = state.value.editor.generation) = updateEditor(generation) { it.copy(title = value) }
+    fun onAllDayChanged(value: Boolean, generation: DataGeneration? = state.value.editor.generation) = updateEditor(generation) { it.copy(isAllDay = value) }
+    fun onStartChanged(value: Instant, generation: DataGeneration? = state.value.editor.generation) = updateEditor(generation) { it.copy(startAt = value) }
+    fun onEndChanged(value: Instant, generation: DataGeneration? = state.value.editor.generation) = updateEditor(generation) { it.copy(endAt = value) }
+    fun onAllDayDatesChanged(start: LocalDate, end: LocalDate, generation: DataGeneration? = state.value.editor.generation) = updateEditor(generation) { it.copy(allDayStartDate = start, allDayEndDate = end) }
+    fun onLocationChanged(value: String, generation: DataGeneration? = state.value.editor.generation) = updateEditor(generation) { it.copy(location = value) }
+    fun onParticipantsChanged(value: String, generation: DataGeneration? = state.value.editor.generation) = updateEditor(generation) { it.copy(participants = value) }
+    fun onNoteChanged(value: String, generation: DataGeneration? = state.value.editor.generation) = updateEditor(generation) { it.copy(note = value) }
+    fun onColorChanged(value: Int, generation: DataGeneration? = state.value.editor.generation) = updateEditor(generation) { it.copy(color = value) }
+    fun onReminderChanged(value: String, generation: DataGeneration? = state.value.editor.generation) = updateEditor(generation) { it.copy(reminderMinutes = value) }
+    fun onRepeatRuleChanged(value: ScheduleRepeatRule, generation: DataGeneration? = state.value.editor.generation) = updateEditor(generation) { it.copy(repeatRule = value) }
+
+    fun saveSchedule(force: Boolean = false, generation: DataGeneration? = state.value.editor.generation) {
+        val current = state.value.editor
+        if (!canUseEditor(generation) || (force && !current.awaitingConflictConfirmation)) return
+        val token = eventToken(current.generation) ?: return
+        state.update { it.copy(errorMessage = null) }
         val reminderText = current.reminderMinutes.trim()
         if (reminderText.isNotEmpty() && (reminderText.toIntOrNull() == null || reminderText.toInt() < 0)) {
-            editor.update { it.copy(validationMessage = "提醒分钟必须是非负整数，留空可关闭提醒") }
+            state.update { it.copy(editor = it.editor.copy(validationMessage = "提醒分钟必须是非负整数，留空可关闭提醒")) }
             return
         }
-        val candidate = current.toSchedule()
-        ScheduleRules.validate(candidate)?.let { message ->
-            editor.update { it.copy(validationMessage = message) }
+        ScheduleRules.validate(current.toSchedule())?.let { message ->
+            state.update { it.copy(editor = it.editor.copy(validationMessage = message)) }
             return
         }
-        editor.update { it.copy(isSaving = true, validationMessage = null) }
+        val operation = Any().also { activeEditorOperation = it }
+        state.update { it.copy(editor = it.editor.copy(isSaving = true, validationMessage = null)) }
         viewModelScope.launch(dispatcher) {
+            var committedEditor: ScheduleEditorState? = null
             try {
-                ScheduleOperationCoordinator.run {
-                    val latest = repository.getSchedules()
-                    val original = current.editingId?.let { id ->
-                        requireNotNull(latest.firstOrNull { it.id == id }) { "日程已删除，请关闭旧表单" }
-                    }
-                    val savedCandidate = current.toSchedule(original)
-                    ScheduleRules.validate(savedCandidate)?.let { throw IllegalArgumentException(it) }
-                    val conflicts = ScheduleRules.conflictsFor(savedCandidate, latest).sortedBy { it.id }
-                    if (conflicts.isNotEmpty() && (!force || conflicts != current.conflictingSchedules)) {
-                        withContext(Dispatchers.Main.immediate) {
-                            editor.update { it.copy(isSaving = false, awaitingConflictConfirmation = true,
-                                conflictingSchedules = conflicts,
-                                validationMessage = "与 ${conflicts.joinToString { item -> item.title }} 时间重叠") }
+                access.run(token) {
+                    ScheduleOperationCoordinator.run module@ {
+                        val latest = repository.getSchedules()
+                        val original = current.editingId?.let { id ->
+                            requireNotNull(latest.firstOrNull { it.id == id }) { "日程已删除，请关闭旧表单" }
                         }
-                        return@run
+                        val candidate = current.toSchedule(original)
+                        ScheduleRules.validate(candidate)?.let { throw IllegalArgumentException(it) }
+                        val conflicts = ScheduleRules.conflictsFor(candidate, latest).sortedBy { it.id }
+                        if (conflicts.isNotEmpty() && (!force || conflicts != current.conflictingSchedules)) {
+                            withContext(Dispatchers.Main.immediate) {
+                                state.update { it.copy(editor = it.editor.copy(isSaving = false,
+                                    awaitingConflictConfirmation = true, conflictingSchedules = conflicts,
+                                    validationMessage = "与 ${conflicts.joinToString { item -> item.title }} 时间重叠")) }
+                            }
+                            return@module
+                        }
+                        val id = repository.saveSchedule(candidate)
+                        withContext(Dispatchers.Main.immediate) {
+                            committedEditor = state.value.editor
+                            state.update { it.copy(editor = ScheduleEditorState()) }
+                        }
+                        try {
+                            reminderScheduler.cancel(id)
+                            reminderScheduler.schedule(candidate.copy(id = id))
+                        } catch (error: Exception) {
+                            if (error is CancellationException) throw error
+                            withContext(Dispatchers.Main.immediate) {
+                                state.update { it.copy(errorMessage = "日程已保存，但提醒设置失败：${error.message ?: "未知错误"}") }
+                            }
+                        }
                     }
-                    val id = repository.saveSchedule(savedCandidate)
-                    val previous = withContext(Dispatchers.Main.immediate) { editor.getAndUpdate { ScheduleEditorState() } }
-                    try {
-                        reminderScheduler.cancel(id)
-                        reminderScheduler.schedule(savedCandidate.copy(id = id))
-                    } catch (error: CancellationException) { throw error }
-                    catch (error: Exception) { errorMessage.value = "日程已保存，但提醒设置失败：${error.message ?: "未知错误"}" }
-                    drainNotification(previous)
                 }
-            } catch (error: CancellationException) { throw error }
-            catch (error: Exception) {
-                withContext(Dispatchers.Main.immediate) {
-                    errorMessage.value = "保存日程失败：${error.message ?: "未知错误"}"
-                    editor.update { it.copy(isSaving = false, validationMessage = errorMessage.value) }
-                }
-            }
+                // Do not inherit a held global permit into the deferred lookup.
+                withContext(Dispatchers.Main.immediate) { committedEditor?.let(::drainNotification) }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                reportFailure(token, "保存日程失败", error, editorFailure = true)
+            } finally { finishEditorOperation(token, operation) }
         }
     }
 
-    fun confirmSaveDespiteConflicts() = saveSchedule(force = true)
+    fun confirmSaveDespiteConflicts(generation: DataGeneration? = state.value.editor.generation) =
+        saveSchedule(force = true, generation = generation)
 
-    fun deleteSchedule(id: Long) {
-        if (editor.value.isSaving) return
-        if (editor.value.isOpen && editor.value.editingId == id) editor.update { it.copy(isSaving = true) }
+    fun deleteSchedule(id: Long, generation: DataGeneration? = state.value.generation) {
+        if (!canUsePage(generation) || state.value.editor.isSaving) return
+        val token = eventToken(generation) ?: return
+        val deletingEditor = state.value.editor.isOpen && state.value.editor.editingId == id
+        val operation = if (deletingEditor) Any().also { activeEditorOperation = it } else null
+        if (deletingEditor) state.update { it.copy(editor = it.editor.copy(isSaving = true)) }
         viewModelScope.launch(dispatcher) {
+            var deletedEditor: ScheduleEditorState? = null
             try {
-                ScheduleOperationCoordinator.run {
-                    repository.deleteSchedule(id)
-                    val previous = withContext(Dispatchers.Main.immediate) {
-                        editor.getAndUpdate { if (it.editingId == id) ScheduleEditorState() else it }
+                access.run(token) {
+                    ScheduleOperationCoordinator.run {
+                        repository.deleteSchedule(id)
+                        withContext(Dispatchers.Main.immediate) {
+                            if (state.value.editor.editingId == id) {
+                                deletedEditor = state.value.editor
+                                state.update { it.copy(editor = ScheduleEditorState()) }
+                            }
+                        }
+                        try { reminderScheduler.cancel(id) }
+                        catch (error: Exception) {
+                            if (error is CancellationException) throw error
+                            withContext(Dispatchers.Main.immediate) {
+                                state.update { it.copy(errorMessage = "日程已删除，但提醒清理失败：${error.message ?: "未知错误"}") }
+                            }
+                        }
                     }
-                    try { reminderScheduler.cancel(id) }
-                    catch (error: CancellationException) { throw error }
-                    catch (error: Exception) { errorMessage.value = "日程已删除，但提醒清理失败：${error.message ?: "未知错误"}" }
-                    if (previous.editingId == id) drainNotification(previous)
                 }
-            } catch (error: CancellationException) { throw error }
-            catch (error: Exception) {
-                withContext(Dispatchers.Main.immediate) {
-                    errorMessage.value = "删除日程失败：${error.message ?: "未知错误"}"
-                    if (editor.value.editingId == id) editor.update { it.copy(isSaving = false, validationMessage = errorMessage.value) }
-                }
+                withContext(Dispatchers.Main.immediate) { deletedEditor?.let(::drainNotification) }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                reportFailure(token, "删除日程失败", error, editorFailure = deletingEditor)
+            } finally { if (operation != null) finishEditorOperation(token, operation) }
+        }
+    }
+
+    private suspend fun finishEditorOperation(token: DataGeneration, operation: Any) {
+        withContext(NonCancellable + Dispatchers.Main.immediate) {
+            if (activeEditorOperation === operation) {
+                activeEditorOperation = null
+                state.update { if (it.editor.generation == token) it.copy(editor = it.editor.copy(isSaving = false)) else it }
             }
         }
     }
 
-    private fun movePeriod(amount: Long) {
-        selectedDate.value = when (viewMode.value) {
-            CalendarViewMode.MONTH -> selectedDate.value.plusMonths(amount)
-            CalendarViewMode.WEEK -> selectedDate.value.plusWeeks(amount)
-            CalendarViewMode.DAY -> selectedDate.value.plusDays(amount)
+    private suspend fun reportFailure(
+        token: DataGeneration, action: String, error: Exception,
+        unavailable: Boolean = false, editorFailure: Boolean = false, sequence: Long? = null,
+    ) {
+        if (error is MaintenanceBusyException || error is StaleGenerationException) return
+        try {
+            access.publishResult(token) {
+                if (observedGeneration != token || (sequence != null && sequence != notificationSequence)) return@publishResult
+                val message = "$action：${error.message ?: "未知错误"}"
+                state.update { it.copy(isAvailable = it.isAvailable && !unavailable, isLoading = false,
+                    errorMessage = message, editor = if (editorFailure && it.editor.generation == token)
+                        it.editor.copy(isSaving = false, validationMessage = message) else it.editor) }
+            }
+        } catch (unreadable: Exception) {
+            if (unreadable is CancellationException) throw unreadable
+            withContext(Dispatchers.Main.immediate) {
+                if (sequence == null || sequence == notificationSequence) generationReadFailed(token)
+            }
         }
+    }
+
+    private fun generationReadFailed(token: DataGeneration?) {
+        // A delayed old fault cannot disable a newer observed generation before its snapshot arrives.
+        if (observedGeneration != token || (state.value.generation != null && state.value.generation != token)) return
+        state.update { it.copy(isAvailable = false, isLoading = false,
+            errorMessage = "读取数据世代失败，请重新启动应用并检查数据") }
+    }
+
+    private fun publishSnapshot(token: DataGeneration, schedules: List<Schedule>, keepNotification: Long? = null) {
+        if (observedGeneration != null && observedGeneration != token) {
+            // This notification's fixed token has just been admitted. Preserve this current request
+            // when its cold query also invalidates an older, unpublished snapshot context.
+            invalidateSnapshot(preserveNotification = keepNotification != null && keepNotification == notificationSequence)
+        }
+        observedGeneration = token
+        recompose(state.value.copy(generation = token, schedules = schedules, isAvailable = true, isLoading = false))
+    }
+
+    private fun invalidateSnapshot(preserveNotification: Boolean = false) {
+        if (!preserveNotification) notificationSequence++
+        activeEditorOperation = null
+        state.update { it.copy(generation = null, schedules = emptyList(), occurrences = emptyList(),
+            editor = ScheduleEditorState(), isAvailable = false, isLoading = true, errorMessage = null) }
+    }
+
+    private fun canUsePage(generation: DataGeneration?) = state.value.isAvailable &&
+        generation != null && generation == state.value.generation && access.maintenance.value == MaintenanceState.IDLE
+
+    private fun canUseEditor(generation: DataGeneration?) = canUsePage(generation) &&
+        state.value.editor.isOpen && !state.value.editor.isSaving && state.value.editor.generation == generation
+
+    private fun eventToken(generation: DataGeneration?): DataGeneration? = try { access.eventToken(generation) }
+    catch (error: IllegalStateException) { state.update { it.copy(errorMessage = error.message) }; null }
+
+    private fun updateEditor(generation: DataGeneration?, transform: (ScheduleEditorState) -> ScheduleEditorState) {
+        if (canUseEditor(generation)) state.update { it.copy(editor = transform(it.editor).copy(
+            awaitingConflictConfirmation = false, conflictingSchedules = emptyList(), validationMessage = null)) }
+    }
+
+    private fun movePeriod(amount: Long, generation: DataGeneration?) {
+        if (!canUsePage(generation)) return
+        val date = state.value.selectedDate
+        recompose(state.value.copy(selectedDate = when (state.value.viewMode) {
+            CalendarViewMode.MONTH -> date.plusMonths(amount)
+            CalendarViewMode.WEEK -> date.plusWeeks(amount)
+            CalendarViewMode.DAY -> date.plusDays(amount)
+        }))
+    }
+
+    private fun recompose(controls: ScheduleUiState) {
+        val (start, end) = visibleRange(controls.selectedDate, controls.viewMode)
+        state.value = controls.copy(occurrences = controls.schedules.flatMap { ScheduleRules.occurrencesInRange(it, start, end) })
     }
 
     private fun visibleRange(date: LocalDate, mode: CalendarViewMode): Pair<LocalDate, LocalDate> = when (mode) {
@@ -238,28 +403,14 @@ class ScheduleViewModel @Inject constructor(
     }
 
     private fun ScheduleEditorState.toSchedule(original: Schedule? = null): Schedule {
-        val zone = ZoneId.systemDefault()
         val now = Instant.now()
-        return (original ?: Schedule(title = title, timeZone = zone.id, createdAt = now)).copy(
-            id = editingId ?: 0,
-            title = title,
-            startAt = if (isAllDay) null else startAt,
-            endAt = if (isAllDay) null else endAt,
-            isAllDay = isAllDay,
-            allDayStartDate = if (isAllDay) allDayStartDate else null,
+        return (original ?: Schedule(title = title, timeZone = ZoneId.systemDefault().id, createdAt = now)).copy(
+            id = editingId ?: 0, title = title,
+            startAt = if (isAllDay) null else startAt, endAt = if (isAllDay) null else endAt,
+            isAllDay = isAllDay, allDayStartDate = if (isAllDay) allDayStartDate else null,
             allDayEndDate = if (isAllDay) allDayEndDate else null,
-            location = location,
-            participants = participants,
-            note = note,
-            color = color,
-            reminderMinutes = reminderMinutes.trim().toIntOrNull(),
-            repeatRule = repeatRule,
-            updatedAt = now,
+            location = location, participants = participants, note = note, color = color,
+            reminderMinutes = reminderMinutes.trim().toIntOrNull(), repeatRule = repeatRule, updatedAt = now,
         )
-    }
-
-    private fun updateEditor(transform: (ScheduleEditorState) -> ScheduleEditorState) {
-        editor.update { if (!it.isOpen || it.isSaving) it else transform(it).copy(
-            awaitingConflictConfirmation = false, conflictingSchedules = emptyList(), validationMessage = null) }
     }
 }

@@ -3,13 +3,19 @@ package com.example.lifemanager.ui.subscription
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lifemanager.di.IoDispatcher
+import com.example.lifemanager.domain.maintenance.DataGeneration
+import com.example.lifemanager.domain.maintenance.MaintenanceBusyException
+import com.example.lifemanager.domain.maintenance.MaintenanceState
+import com.example.lifemanager.domain.maintenance.StaleGenerationException
+import com.example.lifemanager.domain.model.BillingCycle
 import com.example.lifemanager.domain.model.Subscription
 import com.example.lifemanager.domain.model.SubscriptionPayment
-import com.example.lifemanager.domain.repository.SubscriptionRepository
 import com.example.lifemanager.domain.repository.SettingsRepository
-import com.example.lifemanager.domain.usecase.SubscriptionRules
+import com.example.lifemanager.domain.repository.SubscriptionRepository
 import com.example.lifemanager.domain.usecase.SubscriptionOperationCoordinator
+import com.example.lifemanager.domain.usecase.SubscriptionRules
 import com.example.lifemanager.notification.SubscriptionReminderSchedulerContract
+import com.example.lifemanager.ui.common.GenerationAccess
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.Instant
 import java.time.LocalDate
@@ -17,133 +23,287 @@ import java.util.Locale
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 
 @HiltViewModel
-@OptIn(ExperimentalCoroutinesApi::class)
 class SubscriptionViewModel @Inject constructor(
     private val repository: SubscriptionRepository,
     private val scheduler: SubscriptionReminderSchedulerContract,
     private val settingsRepository: SettingsRepository,
     @param:IoDispatcher private val dispatcher: CoroutineDispatcher,
+    private val access: GenerationAccess,
 ) : ViewModel() {
     private val controls = MutableStateFlow(SubscriptionUiState())
-    private val reload = MutableStateFlow(0)
-    private var editorGeneration = 0L
-    private var exportSnapshot: String? = null
-    private data class ReadState<T>(
-        val records: List<T> = emptyList(),
-        val isAvailable: Boolean = false,
-        val isLoading: Boolean = true,
-    )
-    private fun <T> Flow<List<T>>.readState(): Flow<ReadState<T>> =
-        map { ReadState(records = it, isAvailable = true, isLoading = false) }
-            .onStart { emit(ReadState()) }
-            .catch { error ->
-                if (error is CancellationException) throw error
-                controls.update { it.copy(errorMessage = "读取订阅失败，请重试") }
-                emit(ReadState(isLoading = false))
-            }
-    private val data = reload.flatMapLatest {
-        combine(repository.observeSubscriptions().readState(), repository.observeAllPayments().readState()) { list, payments -> list to payments }
-    }
-    val uiState = combine(data, controls) { (subscriptionRead, paymentRead), state ->
-        val list = subscriptionRead.records
-        val payments = paymentRead.records
-        val available = subscriptionRead.isAvailable && paymentRead.isAvailable
-        val today = LocalDate.now()
-        val stats = try { if (available) SubscriptionRules.calculateStats(list, payments, today) else null }
-        catch (_: ArithmeticException) { null }
-        state.copy(subscriptions = list.sortedWith(compareBy<Subscription> {
-            SubscriptionRules.effectiveNextBillingDate(it, today) ?: LocalDate.MAX
-        }.thenBy { it.id }), payments = payments, statistics = stats,
-            isLoading = subscriptionRead.isLoading || paymentRead.isLoading,
-            hasSubscriptionData = subscriptionRead.isAvailable, hasPaymentData = paymentRead.isAvailable,
-            errorMessage = state.errorMessage ?: if (available && stats == null) "统计金额超出支持范围；记录仍可编辑和导出" else null)
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, SubscriptionUiState())
+    val uiState = controls.asStateFlow()
+    private val reload = MutableStateFlow(0L)
+    private val generationReload = MutableStateFlow(0L)
+    private var observedGeneration: DataGeneration? = null
+    private var generationFailed = false
+    private var editorSession = 0L
+    private var detailRequest = 0L
+    private var notificationRequest = 0L
+    private var exportRequest = 0L
+    private var activeMutation: Any? = null
+    private data class NotificationRequest(val id: Long, val generation: DataGeneration, val request: Long)
+    private data class CsvRequest(val text: String, val generation: DataGeneration, val request: Long)
+    private var pendingNotification: NotificationRequest? = null
+    private var exportSnapshot: CsvRequest? = null
+    private var activeExport: CsvRequest? = null
 
-    fun retry() {
-        controls.update { it.copy(errorMessage = null) }
-        reload.value++
+    init {
+        viewModelScope.launch {
+            access.maintenance.collect { phase -> controls.update { it.copy(isMaintaining = phase != MaintenanceState.IDLE) } }
+        }
+        viewModelScope.launch(dispatcher) {
+            generationReload.collectLatest {
+                try {
+                    access.generations.collectLatest { generation ->
+                        withContext(Dispatchers.Main.immediate) {
+                            if (observedGeneration != null && observedGeneration != generation) invalidateSnapshot()
+                            observedGeneration = generation
+                        }
+                        access.maintenance.collectLatest { phase ->
+                            if (phase == MaintenanceState.IDLE) reload.collectLatest { observeSnapshot(generation) }
+                        }
+                    }
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                    withContext(Dispatchers.Main.immediate) { generationUnavailable() }
+                }
+            }
+        }
     }
-    fun clearError() { controls.update { it.copy(errorMessage = null) } }
-    fun reportError(message: String) { controls.update { it.copy(errorMessage = message) } }
+
+    private suspend fun observeSnapshot(generation: DataGeneration) {
+        try {
+            // Long-lived streams only invalidate; their possibly buffered DTOs are never published.
+            combine(repository.observeSubscriptions().map { Unit }, repository.observeAllPayments().map { Unit }) { _, _ -> Unit }.collect {
+                access.read({ repository.observeSubscriptions().first() to repository.observeAllPayments().first() }) { token, (list, payments) ->
+                    if (observedGeneration != token) invalidateSnapshot()
+                    observedGeneration = token
+                    generationFailed = false
+                    val today = LocalDate.now()
+                    val stats = try { SubscriptionRules.calculateStats(list, payments, today) } catch (_: ArithmeticException) { null }
+                    controls.update { state -> state.copy(
+                        generation = token, isAvailable = true, isLoading = false,
+                        hasSubscriptionData = true, hasPaymentData = true,
+                        subscriptions = list.sortedWith(compareBy<Subscription> {
+                            SubscriptionRules.effectiveNextBillingDate(it, today) ?: LocalDate.MAX
+                        }.thenBy { it.id }), payments = payments, statistics = stats,
+                        errorMessage = state.errorMessage ?: if (stats == null) "统计金额超出支持范围；记录仍可编辑和导出" else null,
+                    ) }
+                }
+            }
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            publishResult(generation) { readUnavailable("读取订阅失败，请重试") }
+        }
+    }
+
+    private fun invalidateSnapshot() {
+        editorSession++
+        detailRequest++
+        notificationRequest++
+        activeMutation = null
+        pendingNotification = null
+        exportSnapshot = null
+        activeExport = null
+        controls.update { SubscriptionUiState(selectedTab = it.selectedTab, isMaintaining = it.isMaintaining) }
+    }
+
+    fun retry(generation: DataGeneration? = controls.value.generation) {
+        if (generation != controls.value.generation || access.maintenance.value != MaintenanceState.IDLE || controls.value.isBusy) return
+        controls.update { it.copy(errorMessage = null, isLoading = true, isAvailable = false) }
+        if (generationFailed) generationReload.value++ else reload.value++
+    }
+
+    fun clearError(generation: DataGeneration? = controls.value.generation) {
+        if (generation == controls.value.generation) controls.update { it.copy(errorMessage = null) }
+    }
+
+    fun reportError(message: String, generation: DataGeneration? = controls.value.generation) {
+        if (generation == controls.value.generation) controls.update { it.copy(errorMessage = message) }
+    }
+
     fun selectTab(tab: SubscriptionTab) { controls.update { it.copy(selectedTab = tab) } }
-    fun openDetail(id: Long) {
+
+    private fun eventToken(generation: DataGeneration?): DataGeneration? {
+        if (!controls.value.isAvailable || generation != controls.value.generation) return null
+        return try { access.eventToken(generation) } catch (_: IllegalStateException) { null }
+    }
+
+    fun openDetail(id: Long, generation: DataGeneration? = controls.value.generation) {
+        val token = eventToken(generation) ?: return
+        if (controls.value.subscriptions.none { it.id == id }) return
+        val request = ++detailRequest
         controls.update { it.copy(detailId = id, detailReminderDays = emptySet()) }
-        loadDetailReminders(id)
-    }
-    fun openNotificationDetail(id: Long) {
-        val previous = controls.getAndUpdate { state ->
-            if (state.editor.isOpen || state.paymentEditor.isOpen) state.copy(pendingNotificationId = id)
-            else state.copy(detailId = id, detailReminderDays = emptySet(), pendingNotificationId = null)
-        }
-        if (!previous.editor.isOpen && !previous.paymentEditor.isOpen) loadDetailReminders(id)
-    }
-    private fun drainPendingNotification() {
-        val previous = controls.getAndUpdate { state ->
-            if (state.editor.isOpen || state.paymentEditor.isOpen || state.pendingNotificationId == null) state
-            else state.copy(detailId = state.pendingNotificationId, detailReminderDays = emptySet(), pendingNotificationId = null)
-        }
-        if (!previous.editor.isOpen && !previous.paymentEditor.isOpen) {
-            previous.pendingNotificationId?.let(::loadDetailReminders)
-        }
-    }
-    private fun loadDetailReminders(id: Long) {
         viewModelScope.launch(dispatcher) {
             try {
-                val days = repository.getReminderDays(id)
-                controls.update { if (it.detailId == id) it.copy(detailReminderDays = days) else it }
-            } catch (error: Exception) { handleError(error, "读取提醒设置失败") }
+                access.run(token) {
+                    val days = repository.getReminderDays(id)
+                    withContext(Dispatchers.Main.immediate) {
+                        if (detailRequest == request && controls.value.generation == token && controls.value.detailId == id)
+                            controls.update { it.copy(detailReminderDays = days) }
+                    }
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                if (error is MaintenanceBusyException || error is StaleGenerationException) return@launch
+                publishResult(token) {
+                    if (detailRequest == request && controls.value.detailId == id) setError("读取提醒设置失败")
+                }
+            }
         }
     }
-    fun closeDetail() { controls.update { it.copy(detailId = null) } }
 
-    fun openEditor(subscription: Subscription? = null) {
+    /** External intent protection is separate; the VM's lookup and deferred target retain their arrival token. */
+    fun openNotificationDetail(id: Long) {
+        val request = ++notificationRequest
+        val arrivalGeneration = controls.value.generation ?: observedGeneration
+        if (arrivalGeneration != null) launchNotification(NotificationRequest(id, arrivalGeneration, request))
+        else viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                // Enter capture before the first suspension so maintenance drains the cold-start metadata read.
+                val token = access.capture()
+                launchNotification(NotificationRequest(id, token, request))
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                if (error is MaintenanceBusyException || error is StaleGenerationException) return@launch
+                withContext(Dispatchers.Main.immediate) {
+                    if (notificationRequest == request && observedGeneration == null && controls.value.generation == null) generationUnavailable()
+                }
+            }
+        }
+    }
+
+    private fun launchNotification(target: NotificationRequest) {
+        viewModelScope.launch(dispatcher) {
+            try { deliverNotification(target) }
+            catch (error: Exception) {
+                if (error is CancellationException) throw error
+                publishResult(target.generation) { if (notificationRequest == target.request) setError("读取提醒设置失败") }
+            }
+        }
+    }
+
+    private suspend fun deliverNotification(target: NotificationRequest) {
+        while (true) {
+            try {
+                access.run(target.generation) {
+                    val deferred = withContext(Dispatchers.Main.immediate) {
+                        if (notificationRequest != target.request) true
+                        else if (controls.value.editor.isOpen || controls.value.paymentEditor.isOpen) {
+                            pendingNotification = target
+                            controls.update { it.copy(pendingNotificationId = target.id) }
+                            true
+                        } else false
+                    }
+                    if (!deferred) {
+                        val days = repository.getReminderDays(target.id)
+                        withContext(Dispatchers.Main.immediate) {
+                            if (notificationRequest == target.request) {
+                                if (controls.value.editor.isOpen || controls.value.paymentEditor.isOpen) {
+                                    pendingNotification = target
+                                    controls.update { it.copy(pendingNotificationId = target.id) }
+                                } else {
+                                    detailRequest++
+                                    pendingNotification = null
+                                    controls.update { it.copy(detailId = target.id, detailReminderDays = days, pendingNotificationId = null) }
+                                }
+                            }
+                        }
+                    }
+                }
+                return
+            } catch (_: MaintenanceBusyException) {
+                // Only a fixed-token read waits; mutations never queue here.
+                access.maintenance.first { it == MaintenanceState.IDLE }
+                yield()
+            } catch (_: StaleGenerationException) { return }
+        }
+    }
+
+    private fun drainPendingNotification() {
+        val target = pendingNotification ?: return
+        if (!controls.value.editor.isOpen && !controls.value.paymentEditor.isOpen) launchNotification(target)
+    }
+
+    fun closeDetail(generation: DataGeneration? = controls.value.generation) {
+        if (generation != controls.value.generation) return
+        detailRequest++
+        controls.update { it.copy(detailId = null, detailReminderDays = emptySet()) }
+    }
+
+    fun openEditor(subscription: Subscription? = null, generation: DataGeneration? = controls.value.generation) {
         if (controls.value.isBusy) return
-        val generation = ++editorGeneration
-        controls.update { it.copy(editor = SubscriptionEditorState(isOpen = true, sessionId = generation, original = subscription,
+        val token = eventToken(generation) ?: return
+        if (subscription != null && controls.value.subscriptions.none { it == subscription }) return
+        val session = ++editorSession
+        controls.update { it.copy(editor = SubscriptionEditorState(generation = token,
+            isOpen = true, sessionId = session, original = subscription,
             name = subscription?.appName.orEmpty(), amount = subscription?.let { amountText(it.amountMinor, it.currency) }.orEmpty(),
-            currency = subscription?.currency ?: "CNY", billingCycle = subscription?.billingCycle ?: com.example.lifemanager.domain.model.BillingCycle.MONTHLY,
+            currency = subscription?.currency ?: "CNY", billingCycle = subscription?.billingCycle ?: BillingCycle.MONTHLY,
             nextBillingDate = (subscription?.nextBillingDate ?: LocalDate.now()).toString(),
             startDate = (subscription?.startDate ?: LocalDate.now()).toString(), category = subscription?.category.orEmpty(),
             note = subscription?.note.orEmpty(), isLoadingReminders = true)) }
         viewModelScope.launch(dispatcher) {
             try {
-                val defaults = if (subscription == null) settingsRepository.getSettings() else null
-                val days = defaults?.defaultReminderDays ?: repository.getReminderDays(subscription!!.id)
-                controls.update { state ->
-                    if (state.editor.sessionId == generation && state.editor.isOpen)
-                        state.copy(editor = state.editor.copy(currency = defaults?.defaultCurrency ?: state.editor.currency,
-                            reminderDays = days, isLoadingReminders = false))
-                    else state
+                access.run(token) {
+                    // Strict getSettings never initializes missing rows; read defaults under this draft's permit.
+                    val defaults = if (subscription == null) settingsRepository.getSettings() else null
+                    val days = defaults?.defaultReminderDays ?: repository.getReminderDays(subscription!!.id)
+                    withContext(Dispatchers.Main.immediate) {
+                        controls.update { state ->
+                            if (state.editor.sessionId == session && state.editor.generation == token && state.editor.isOpen)
+                                state.copy(editor = state.editor.copy(currency = defaults?.defaultCurrency ?: state.editor.currency,
+                                    reminderDays = days.toSet(), isLoadingReminders = false))
+                            else state
+                        }
+                    }
                 }
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
-                controls.update { state ->
-                    if (state.editor.sessionId == generation && state.editor.isOpen)
-                        state.copy(editor = state.editor.copy(isLoadingReminders = false, preferencesError =
-                            if (subscription == null) "读取新建订阅偏好失败，请关闭后重试" else "读取提醒配置失败，请关闭后重试"))
-                    else state
+                if (error is StaleGenerationException) return@launch
+                publishResult(token) {
+                    controls.update { state ->
+                        if (state.editor.sessionId == session && state.editor.generation == token && state.editor.isOpen)
+                            state.copy(editor = state.editor.copy(isLoadingReminders = false, preferencesError =
+                                if (subscription == null) "读取新建订阅偏好失败，请关闭后重试" else "读取提醒配置失败，请关闭后重试"))
+                        else state
+                    }
                 }
-                // Keep saving disabled: do not silently replace unread reminder settings.
             }
         }
     }
-    fun closeEditor() {
-        if (controls.value.editor.isSaving) return
-        editorGeneration++
+
+    fun closeEditor(generation: DataGeneration? = controls.value.editor.generation) {
+        if (controls.value.editor.isSaving || controls.value.editor.generation != generation) return
+        editorSession++
         controls.update { it.copy(editor = SubscriptionEditorState()) }
         drainPendingNotification()
     }
-    fun updateEditor(transform: (SubscriptionEditorState) -> SubscriptionEditorState) {
-        controls.update { if (it.editor.isSaving) it else it.copy(editor = transform(it.editor).copy(validationMessage = null)) }
+
+    fun updateEditor(generation: DataGeneration? = controls.value.editor.generation, transform: (SubscriptionEditorState) -> SubscriptionEditorState) {
+        controls.update {
+            if (!it.editor.isOpen || it.editor.isSaving || it.editor.generation != generation) it
+            else {
+                val next = transform(it.editor)
+                it.copy(editor = next.copy(generation = it.editor.generation, sessionId = it.editor.sessionId,
+                    original = it.editor.original, reminderDays = next.reminderDays.toSet(), validationMessage = null))
+            }
+        }
     }
-    fun saveSubscription() {
-        val editor = controls.value.editor
-        if (!editor.isOpen || editor.isSaving || editor.isLoadingReminders || editor.preferencesError != null || controls.value.isBusy) return
+
+    fun saveSubscription(generation: DataGeneration? = controls.value.editor.generation) {
+        val editor = controls.value.editor.copy(reminderDays = controls.value.editor.reminderDays.toSet())
+        if (!editor.isOpen || editor.isSaving || editor.isLoadingReminders || editor.preferencesError != null || controls.value.isBusy || editor.generation != generation) return
+        val token = eventToken(generation) ?: return
         val currency = editor.currency.trim().uppercase(Locale.ROOT)
         val amount = SubscriptionRules.parseAmountMinor(editor.amount, currency)
         val next = parseDate(editor.nextBillingDate)
@@ -165,58 +325,84 @@ class SubscriptionViewModel @Inject constructor(
             controls.update { it.copy(editor = editor.copy(validationMessage = message)) }; return
         }
         controls.update { it.copy(editor = editor.copy(isSaving = true)) }
-        mutate("保存订阅失败") {
-            // Lifecycle state is not an editable form field. Preserve the latest cancellation/restoration.
+        mutate(token, "保存订阅失败") {
             val current = original?.let { checkNotNull(repository.getSubscription(it.id)) { "订阅已被删除" } }
             val saved = subscription.copy(isActive = current?.isActive ?: true,
                 cancelDate = current?.cancelDate, createdAt = current?.createdAt ?: subscription.createdAt)
             require(SubscriptionRules.validate(saved) == null) { "日期与当前订阅状态不一致" }
             val id = repository.saveSubscription(saved, editor.reminderDays)
             reconcile(saved.copy(id = id), editor.reminderDays)
-            editorGeneration++
-            controls.update { it.copy(editor = SubscriptionEditorState(), detailReminderDays = editor.reminderDays) }
-            drainPendingNotification()
+            withContext(Dispatchers.Main.immediate) {
+                editorSession++
+                controls.update { it.copy(editor = SubscriptionEditorState(), detailReminderDays = editor.reminderDays) }
+            }
         }
     }
-    fun cancelSubscription(id: Long) = changeActive(id, false)
-    fun restoreSubscription(id: Long) = changeActive(id, true)
-    private fun changeActive(id: Long, active: Boolean) = mutate("更新订阅失败") {
-        val subscription = checkNotNull(repository.getSubscription(id)) { "订阅已被删除" }
-        val days = repository.getReminderDays(id)
-        val saved = subscription.copy(isActive = active, cancelDate = if (active) null else maxOf(LocalDate.now(), subscription.startDate), updatedAt = Instant.now())
-        repository.saveSubscription(saved, days)
-        reconcile(saved, days)
+
+    fun cancelSubscription(id: Long, generation: DataGeneration? = controls.value.generation) = changeActive(id, false, generation)
+    fun restoreSubscription(id: Long, generation: DataGeneration? = controls.value.generation) = changeActive(id, true, generation)
+
+    private fun changeActive(id: Long, active: Boolean, generation: DataGeneration?) {
+        val token = eventToken(generation) ?: return
+        mutate(token, "更新订阅失败") {
+            val subscription = checkNotNull(repository.getSubscription(id)) { "订阅已被删除" }
+            val days = repository.getReminderDays(id)
+            val saved = subscription.copy(isActive = active, cancelDate = if (active) null else maxOf(LocalDate.now(), subscription.startDate), updatedAt = Instant.now())
+            repository.saveSubscription(saved, days)
+            reconcile(saved, days)
+        }
     }
-    fun deleteSubscription(id: Long) = mutate("删除订阅失败") {
-        repository.deleteSubscription(id)
-        try { scheduler.cancelAll(id) } catch (error: Exception) { handleError(error, "数据已删除，但提醒清理失败") }
-        if (controls.value.detailId == id) closeDetail()
+
+    fun deleteSubscription(id: Long, generation: DataGeneration? = controls.value.generation) {
+        val token = eventToken(generation) ?: return
+        mutate(token, "删除订阅失败") {
+            repository.deleteSubscription(id)
+            try { scheduler.cancelAll(id) } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                withContext(Dispatchers.Main.immediate) { setError("数据已删除，但提醒清理失败") }
+            }
+            withContext(Dispatchers.Main.immediate) { if (controls.value.detailId == id) closeDetail(token) }
+        }
     }
-    private fun reconcile(subscription: Subscription, days: Set<Int>) {
+
+    private suspend fun reconcile(subscription: Subscription, days: Set<Int>) {
         try {
             scheduler.cancelAll(subscription.id)
             if (subscription.isActive) scheduler.schedule(subscription, days)
-        } catch (error: Exception) { handleError(error, "数据已保存，但提醒安排失败，请检查系统提醒权限") }
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            withContext(Dispatchers.Main.immediate) { setError("数据已保存，但提醒安排失败，请检查系统提醒权限") }
+        }
     }
 
-    fun openPaymentEditor(subscriptionId: Long, payment: SubscriptionPayment? = null) {
+    fun openPaymentEditor(subscriptionId: Long, payment: SubscriptionPayment? = null, generation: DataGeneration? = controls.value.generation) {
         if (controls.value.isBusy) return
-        val subscription = uiState.value.subscriptions.firstOrNull { it.id == subscriptionId } ?: return
-        controls.update { it.copy(paymentEditor = PaymentEditorState(isOpen = true, subscriptionId = subscriptionId,
+        val token = eventToken(generation) ?: return
+        val subscription = controls.value.subscriptions.firstOrNull { it.id == subscriptionId } ?: return
+        if (payment != null && (payment.subscriptionId != subscriptionId || payment !in controls.value.payments)) return
+        controls.update { it.copy(paymentEditor = PaymentEditorState(generation = token, isOpen = true, subscriptionId = subscriptionId,
             editingId = payment?.id ?: 0, amount = amountText(payment?.amountMinor ?: subscription.amountMinor, payment?.currency ?: subscription.currency),
             currency = payment?.currency ?: subscription.currency, paidAt = (payment?.paidAt ?: LocalDate.now()).toString(), note = payment?.note.orEmpty())) }
     }
-    fun closePaymentEditor() {
-        if (controls.value.paymentEditor.isSaving) return
+
+    fun closePaymentEditor(generation: DataGeneration? = controls.value.paymentEditor.generation) {
+        if (controls.value.paymentEditor.isSaving || controls.value.paymentEditor.generation != generation) return
         controls.update { it.copy(paymentEditor = PaymentEditorState()) }
         drainPendingNotification()
     }
-    fun updatePaymentEditor(transform: (PaymentEditorState) -> PaymentEditorState) {
-        controls.update { if (it.paymentEditor.isSaving) it else it.copy(paymentEditor = transform(it.paymentEditor).copy(validationMessage = null)) }
+
+    fun updatePaymentEditor(generation: DataGeneration? = controls.value.paymentEditor.generation, transform: (PaymentEditorState) -> PaymentEditorState) {
+        controls.update {
+            if (!it.paymentEditor.isOpen || it.paymentEditor.isSaving || it.paymentEditor.generation != generation) it
+            else it.copy(paymentEditor = transform(it.paymentEditor).copy(generation = it.paymentEditor.generation,
+                subscriptionId = it.paymentEditor.subscriptionId, editingId = it.paymentEditor.editingId, validationMessage = null))
+        }
     }
-    fun savePayment() {
+
+    fun savePayment(generation: DataGeneration? = controls.value.paymentEditor.generation) {
         val editor = controls.value.paymentEditor
-        if (!editor.isOpen || editor.isSaving || controls.value.isBusy) return
+        if (!editor.isOpen || editor.isSaving || controls.value.isBusy || editor.generation != generation) return
+        val token = eventToken(generation) ?: return
         val currency = editor.currency.trim().uppercase(Locale.ROOT)
         val amount = SubscriptionRules.parseAmountMinor(editor.amount, currency)
         val date = parseDate(editor.paidAt)
@@ -224,56 +410,123 @@ class SubscriptionViewModel @Inject constructor(
             controls.update { it.copy(paymentEditor = editor.copy(validationMessage = "请输入有效的金额、币种和日期（YYYY-MM-DD）")) }; return
         }
         controls.update { it.copy(paymentEditor = editor.copy(isSaving = true)) }
-        mutate("保存扣费记录失败") {
+        mutate(token, "保存扣费记录失败") {
+            checkNotNull(repository.getSubscription(editor.subscriptionId)) { "订阅已被删除" }
+            if (editor.editingId != 0L) require(repository.observeAllPayments().first().any { it.id == editor.editingId && it.subscriptionId == editor.subscriptionId }) { "扣费记录已被删除" }
             repository.savePayment(SubscriptionPayment(editor.editingId, editor.subscriptionId, amount, currency, date, editor.note))
-            controls.update { it.copy(paymentEditor = PaymentEditorState()) }
-            drainPendingNotification()
+            withContext(Dispatchers.Main.immediate) { controls.update { it.copy(paymentEditor = PaymentEditorState()) } }
         }
     }
-    fun deletePayment(id: Long) = mutate("删除扣费记录失败") { repository.deletePayment(id) }
 
-    fun prepareCsvExport(): String? {
-        val state = uiState.value
-        if (!state.canExportCsv || controls.value.isExportPending || controls.value.isExporting) return null
-        return SubscriptionRules.exportCsv(state.subscriptions, state.payments).also {
-            exportSnapshot = it
-            controls.update { current -> current.copy(isExportPending = true, exportMessage = null) }
+    fun deletePayment(id: Long, generation: DataGeneration? = controls.value.generation) {
+        val token = eventToken(generation) ?: return
+        mutate(token, "删除扣费记录失败") { repository.deletePayment(id) }
+    }
+
+    fun prepareCsvExport(generation: DataGeneration? = controls.value.generation): String? {
+        val state = controls.value
+        val token = eventToken(generation) ?: return null
+        if (!state.canExportCsv) return null
+        val text = SubscriptionRules.exportCsv(state.subscriptions, state.payments)
+        val request = CsvRequest(text, token, ++exportRequest)
+        exportSnapshot = request
+        controls.update { it.copy(isExportPending = true, exportRequestId = request.request, exportMessage = null) }
+        return text
+    }
+
+    fun cancelCsvExport(generation: DataGeneration? = exportSnapshot?.generation, requestId: Long? = exportSnapshot?.request) {
+        val request = exportSnapshot ?: return
+        if (generation != request.generation || requestId != request.request) return
+        exportSnapshot = null
+        controls.update { it.copy(isExportPending = false, exportRequestId = null) }
+    }
+
+    /** File IO outlives composition; its result retains the prepared token and request ID. */
+    fun completeCsvExport(generation: DataGeneration? = exportSnapshot?.generation, requestId: Long? = exportSnapshot?.request, write: suspend (String) -> Unit) {
+        val request = exportSnapshot ?: return
+        if (generation != request.generation || requestId != request.request) return
+        if (eventToken(generation) == null) {
+            // The picker has returned. Release this request instead of leaving an unfinishable pending export.
+            cancelCsvExport(generation, requestId)
+            return
         }
-    }
-    fun cancelCsvExport() {
         exportSnapshot = null
-        controls.update { it.copy(isExportPending = false) }
-    }
-    /** Writer uses application context at the UI boundary; work outlives the composition. */
-    fun completeCsvExport(write: suspend (String) -> Unit) {
-        val snapshot = exportSnapshot ?: return
-        exportSnapshot = null
+        activeExport = request
         controls.update { it.copy(isExportPending = false, isExporting = true, exportMessage = null) }
         viewModelScope.launch(dispatcher) {
             try {
-                write(snapshot)
-                controls.update { it.copy(exportMessage = "CSV 已导出") }
+                // Validate before invoking the provider, without holding DB admission during file IO.
+                val admitted = access.run(request.generation) { withContext(Dispatchers.Main.immediate) { activeExport === request } }
+                if (!admitted) return@launch
+                write(request.text)
+                publishResult(request.generation) { if (activeExport === request) controls.update { it.copy(exportMessage = "CSV 已导出") } }
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
-                controls.update { it.copy(exportMessage = "导出失败，请检查文件位置和可用空间") }
-            } finally { controls.update { it.copy(isExporting = false) } }
+                if (error !is StaleGenerationException && error !is MaintenanceBusyException)
+                    publishResult(request.generation) { if (activeExport === request) controls.update { it.copy(exportMessage = "导出失败，请检查文件位置和可用空间") } }
+            } finally {
+                withContext(NonCancellable + Dispatchers.Main.immediate) {
+                    if (activeExport === request) {
+                        activeExport = null
+                        controls.update { it.copy(isExporting = false, exportRequestId = null) }
+                    }
+                }
+            }
         }
     }
 
-    private fun mutate(failureMessage: String, action: suspend () -> Unit) {
+    private fun mutate(token: DataGeneration, failureMessage: String, action: suspend () -> Unit) {
         if (controls.value.isBusy) return
+        val operation = Any()
+        activeMutation = operation
         controls.update { it.copy(isBusy = true, errorMessage = null) }
         viewModelScope.launch(dispatcher) {
-            try { SubscriptionOperationCoordinator.run { action() } }
-            catch (error: Exception) { handleError(error, failureMessage) }
-            finally { controls.update { it.copy(isBusy = false, editor = it.editor.copy(isSaving = false), paymentEditor = it.paymentEditor.copy(isSaving = false)) } }
+            var succeeded = false
+            try {
+                access.run(token) { SubscriptionOperationCoordinator.run { action() } }
+                succeeded = true
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                if (error !is MaintenanceBusyException && error !is StaleGenerationException)
+                    publishResult(token) { if (activeMutation === operation) setError(failureMessage) }
+            } finally {
+                withContext(NonCancellable + Dispatchers.Main.immediate) {
+                    if (activeMutation === operation) {
+                        activeMutation = null
+                        controls.update { it.copy(isBusy = false, editor = it.editor.copy(isSaving = false), paymentEditor = it.paymentEditor.copy(isSaving = false)) }
+                        // Both outer permits have ended before the next lookup begins.
+                        if (succeeded) drainPendingNotification()
+                    }
+                }
+            }
         }
     }
-    private fun parseDate(value: String): LocalDate? = runCatching { LocalDate.parse(value.trim()) }.getOrNull()
-    private fun handleError(error: Exception, message: String) {
-        if (error is CancellationException) throw error
+
+    private suspend fun publishResult(token: DataGeneration, publish: () -> Unit) {
+        try { access.publishResult(token, publish) }
+        catch (error: Exception) {
+            if (error is CancellationException) throw error
+            withContext(Dispatchers.Main.immediate) {
+                if (observedGeneration == token && (controls.value.generation == null || controls.value.generation == token)) generationUnavailable()
+            }
+        }
+    }
+
+    private fun generationUnavailable() {
+        generationFailed = true
+        readUnavailable("读取数据世代失败，请重试并检查数据")
+    }
+
+    private fun readUnavailable(message: String) {
+        controls.update { it.copy(isAvailable = false, isLoading = false, hasSubscriptionData = false, hasPaymentData = false,
+            statistics = null, errorMessage = message) }
+    }
+
+    private fun setError(message: String) {
         controls.update { it.copy(errorMessage = message,
             editor = if (it.editor.isOpen) it.editor.copy(validationMessage = message) else it.editor,
             paymentEditor = if (it.paymentEditor.isOpen) it.paymentEditor.copy(validationMessage = message) else it.paymentEditor) }
     }
+
+    private fun parseDate(value: String): LocalDate? = runCatching { LocalDate.parse(value.trim()) }.getOrNull()
 }

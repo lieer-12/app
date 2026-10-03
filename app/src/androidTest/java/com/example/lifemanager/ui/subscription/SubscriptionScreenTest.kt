@@ -10,6 +10,9 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.compose.runtime.CompositionLocalProvider
 import com.example.lifemanager.data.local.LifeManagerDatabase
 import com.example.lifemanager.data.repository.SettingsRepositoryImpl
+import com.example.lifemanager.data.repository.DataGenerationRepositoryImpl
+import com.example.lifemanager.domain.maintenance.MaintenanceCoordinator
+import com.example.lifemanager.ui.common.GenerationAccess
 import com.example.lifemanager.domain.model.DateFormat
 import com.example.lifemanager.ui.settings.LocalDateFormat
 import com.example.lifemanager.domain.model.Subscription
@@ -29,8 +32,11 @@ import kotlin.test.assertEquals
 class SubscriptionScreenTest {
     @get:Rule val compose = createComposeRule()
     private val repository = ScreenRepository()
-    private val settingsDatabase = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), LifeManagerDatabase::class.java).build()
-    private val model = SubscriptionViewModel(repository, NoAlarms(), SettingsRepositoryImpl(settingsDatabase), Dispatchers.IO)
+    private val settingsDatabase = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), LifeManagerDatabase::class.java)
+        .addCallback(LifeManagerDatabase.INITIALIZE).build()
+    private val generations = DataGenerationRepositoryImpl(settingsDatabase)
+    private val model = SubscriptionViewModel(repository, NoAlarms(), SettingsRepositoryImpl(settingsDatabase), Dispatchers.IO,
+        GenerationAccess(generations, MaintenanceCoordinator(generations)))
     @After fun cleanup() { model.viewModelScope.cancel(); settingsDatabase.close() }
     private fun show(dateFormat: DateFormat = DateFormat.YMD) {
         compose.setContent {
@@ -39,6 +45,7 @@ class SubscriptionScreenTest {
                 SubscriptionContent(state, model, onExport = {})
             } }
         }
+        compose.waitUntil(5000) { !model.uiState.value.isLoading }
     }
     @Test fun addSubscriptionOpensEditableForm() {
         show()
@@ -51,6 +58,7 @@ class SubscriptionScreenTest {
         compose.onNodeWithContentDescription("添加订阅").performClick()
         compose.onNodeWithText("订阅名称").performTextInput("我的服务")
         compose.onNodeWithText("金额").performTextInput("15.00")
+        compose.waitUntil(5000) { !model.uiState.value.editor.isLoadingReminders }
         compose.onNodeWithText("保存订阅").performClick()
         compose.waitUntil(5000) { repository.list.value.size == 1 }
         compose.onNodeWithText("我的服务").assertExists()

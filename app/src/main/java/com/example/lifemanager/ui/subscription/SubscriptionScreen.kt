@@ -13,8 +13,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -23,6 +26,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lifemanager.domain.usecase.SubscriptionRules
+import com.example.lifemanager.domain.maintenance.DataGeneration
 import java.time.LocalDate
 import com.example.lifemanager.ui.settings.displayDate
 import java.time.temporal.ChronoUnit
@@ -30,11 +34,19 @@ import java.time.temporal.ChronoUnit
 @Composable
 fun SubscriptionScreen(viewModel: SubscriptionViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val renderedGeneration = state.generation
     val context = LocalContext.current.applicationContext
-    var privacyConfirm by remember { mutableStateOf(false) }
+    var privacyConfirm by remember(renderedGeneration) { mutableStateOf(false) }
+    // Keep the original launch association across replacement and recomposition until its result returns.
+    var pickerGeneration by rememberSaveable { mutableStateOf<Long?>(null) }
+    var pickerRequestId by rememberSaveable { mutableStateOf<Long?>(null) }
     val createCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
-        if (uri == null) viewModel.cancelCsvExport()
-        else viewModel.completeCsvExport { snapshot ->
+        val launchedGeneration = pickerGeneration?.let(::DataGeneration)
+        val launchedRequestId = pickerRequestId
+        pickerGeneration = null
+        pickerRequestId = null
+        if (launchedGeneration != null && launchedRequestId != null && uri == null) viewModel.cancelCsvExport(launchedGeneration, launchedRequestId)
+        else if (launchedGeneration != null && launchedRequestId != null && uri != null) viewModel.completeCsvExport(launchedGeneration, launchedRequestId) { snapshot ->
             checkNotNull(context.contentResolver.openOutputStream(uri, "wt")) { "无法打开文件" }.use {
                 it.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
                 it.write(snapshot.toByteArray(Charsets.UTF_8))
@@ -45,16 +57,22 @@ fun SubscriptionScreen(viewModel: SubscriptionViewModel = hiltViewModel()) {
         ReminderPermissionBanner()
         if (state.isExporting) LinearProgressIndicator(Modifier.fillMaxWidth())
         state.exportMessage?.let { Text(it, Modifier.padding(horizontal = 16.dp)) }
-        SubscriptionContent(state, viewModel, onExport = { if (state.canExportCsv) privacyConfirm = true })
+        SubscriptionContent(state, viewModel, onExport = { if (pickerGeneration == null && state.canExportCsv) privacyConfirm = true })
     }
     if (privacyConfirm) AlertDialog(
         onDismissRequest = { privacyConfirm = false },
         title = { Text("导出消费数据") },
         text = { Text("文件包含全部订阅名称、金额、备注和实际扣费记录。请保存在可信位置，谨慎分享。非人民币记录也会导出。") },
-        confirmButton = { TextButton(enabled = state.canExportCsv, onClick = {
-            val snapshot = viewModel.prepareCsvExport()
+        confirmButton = { TextButton(enabled = state.canExportCsv && pickerGeneration == null, onClick = {
+            if (pickerGeneration != null) return@TextButton
+            val snapshot = viewModel.prepareCsvExport(renderedGeneration)
             privacyConfirm = false
-            if (snapshot != null) createCsv.launch("subscriptions-${LocalDate.now()}.csv")
+            val requestId = viewModel.uiState.value.exportRequestId
+            if (snapshot != null && renderedGeneration != null && requestId != null) {
+                pickerGeneration = renderedGeneration.value
+                pickerRequestId = requestId
+                createCsv.launch("subscriptions-${LocalDate.now()}.csv")
+            }
         }) { Text("选择保存位置") } },
         dismissButton = { TextButton(onClick = { privacyConfirm = false }) { Text("取消") } },
     )
@@ -63,9 +81,14 @@ fun SubscriptionScreen(viewModel: SubscriptionViewModel = hiltViewModel()) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SubscriptionContent(state: SubscriptionUiState, viewModel: SubscriptionViewModel, onExport: () -> Unit) {
+    val renderedGeneration = state.generation
+    val canMutate = state.isAvailable && !state.isMaintaining && !state.isBusy
     Scaffold(
         topBar = { TopAppBar(title = { Text("订阅费用") }, actions = { TextButton(onClick = onExport, enabled = state.canExportCsv) { Text("导出 CSV") } }) },
-        floatingActionButton = { FloatingActionButton(onClick = { viewModel.openEditor() }) { Icon(Icons.Outlined.Add, contentDescription = "添加订阅") } },
+        floatingActionButton = { FloatingActionButton(
+            onClick = { if (canMutate) viewModel.openEditor(generation = renderedGeneration) },
+            modifier = Modifier.semantics { if (!canMutate) disabled() },
+        ) { Icon(Icons.Outlined.Add, contentDescription = "添加订阅") } },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             TabRow(selectedTabIndex = state.selectedTab.ordinal) {
@@ -77,11 +100,12 @@ fun SubscriptionContent(state: SubscriptionUiState, viewModel: SubscriptionViewM
                 state.errorMessage?.let { message -> item {
                     Text(message, color = MaterialTheme.colorScheme.error)
                     Row {
-                        TextButton(onClick = viewModel::retry) { Text("重试读取") }
-                        TextButton(onClick = viewModel::clearError) { Text("关闭提示") }
+                        TextButton(onClick = { viewModel.retry(renderedGeneration) }, enabled = !state.isMaintaining && !state.isBusy) { Text("重试读取") }
+                        TextButton(onClick = { viewModel.clearError(renderedGeneration) }) { Text("关闭提示") }
                     }
                 } }
                 if (state.isLoading) item { CircularProgressIndicator() }
+                if (state.isMaintaining) item { Text("数据维护中，请稍后；未提交的草稿会保留。") }
                 item { Text("统计仅汇总 CNY；其他币种可管理和导出，不做汇率换算。", style = MaterialTheme.typography.bodySmall) }
                 state.statistics?.let { stats -> item {
                     Card(Modifier.fillMaxWidth()) {
@@ -99,7 +123,7 @@ fun SubscriptionContent(state: SubscriptionUiState, viewModel: SubscriptionViewM
                     if (!state.isLoading && state.subscriptions.isEmpty()) item { Text("还没有订阅。点击右下角添加，开始记录费用。") }
                     items(state.subscriptions, key = { it.id }) { subscription ->
                         val due = SubscriptionRules.effectiveNextBillingDate(subscription, LocalDate.now())
-                        Card(onClick = { viewModel.openDetail(subscription.id) }, modifier = Modifier.fillMaxWidth()) {
+                        Card(onClick = { viewModel.openDetail(subscription.id, renderedGeneration) }, enabled = canMutate, modifier = Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(subscription.appName, style = MaterialTheme.typography.titleMedium)
                                 Text("${moneyText(subscription.amountMinor, subscription.currency)} / ${cycleLabel(subscription.billingCycle)}")
@@ -116,8 +140,8 @@ fun SubscriptionContent(state: SubscriptionUiState, viewModel: SubscriptionViewM
     val pendingNotificationLabel = state.pendingNotificationId?.let { id ->
         state.subscriptions.firstOrNull { it.id == id }?.let { "${it.appName}（ID: $id）" } ?: "ID: $id"
     }
-    if (state.editor.isOpen) SubscriptionEditor(state.editor, viewModel, pendingNotificationLabel)
-    if (state.paymentEditor.isOpen) PaymentEditor(state.paymentEditor, viewModel, pendingNotificationLabel)
+    if (state.editor.isOpen) SubscriptionEditor(state.editor, viewModel, pendingNotificationLabel, canMutate)
+    if (state.paymentEditor.isOpen) PaymentEditor(state.paymentEditor, viewModel, pendingNotificationLabel, canMutate)
 }
 
 @Composable

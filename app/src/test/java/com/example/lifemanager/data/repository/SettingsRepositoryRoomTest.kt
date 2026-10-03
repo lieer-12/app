@@ -54,6 +54,30 @@ class SettingsRepositoryRoomTest {
         assertEquals(null, database.settingsDao().get())
     }
 
+    @Test fun finiteSettingsReadDoesNotAttemptAnInitializationWrite(): Unit = runBlocking {
+        database.settingsDao().get()
+        database.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER test_no_finite_read_insert BEFORE INSERT ON app_settings BEGIN SELECT RAISE(ABORT, 'read must not initialize'); END",
+        )
+        assertEquals(ThemeMode.SYSTEM, repository.getSettings().theme)
+    }
+
+    @Test fun missingSettingsCannotBeSilentlyRecreatedByFiniteRead(): Unit = runBlocking {
+        database.openHelper.writableDatabase.execSQL("DELETE FROM app_settings")
+        assertFailsWith<IllegalStateException> { repository.getSettings() }
+        assertEquals(null, database.settingsDao().get())
+    }
+
+    @Test fun missingSettingsUpdateFailsBeforeTransformWithoutRecreatingDefaults(): Unit = runBlocking {
+        database.openHelper.writableDatabase.execSQL("DELETE FROM app_settings")
+        var transformed = false
+        assertFailsWith<IllegalStateException> {
+            repository.updateSettings { transformed = true; it.copy(theme = ThemeMode.DARK) }
+        }
+        assertEquals(false, transformed)
+        assertEquals(null, database.settingsDao().get())
+    }
+
     @Test fun settingsRoundTripRetainsIndependentFieldsAndAllReminderBits(): Unit = runBlocking {
         repository.updateSettings { it.copy(theme = ThemeMode.DARK, dateFormat = DateFormat.DMY,
             defaultCurrency = "USD", todoReminders = false, defaultReminderDays = setOf(1, 3, 7)) }
