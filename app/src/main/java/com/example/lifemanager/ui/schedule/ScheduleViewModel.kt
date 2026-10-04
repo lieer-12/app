@@ -46,6 +46,7 @@ class ScheduleViewModel @Inject constructor(
     // Main owns all published state and notification ordering.
     private var observedGeneration: DataGeneration? = null
     private var notificationSequence = 0L
+    private var notificationGeneration: DataGeneration? = null
     private var activeEditorOperation: Any? = null
 
     init {
@@ -60,8 +61,7 @@ class ScheduleViewModel @Inject constructor(
                 access.generations.collectLatest { generation ->
                     listenerGeneration = generation
                     withContext(Dispatchers.Main.immediate) {
-                        if (observedGeneration != null && observedGeneration != generation) invalidateSnapshot()
-                        observedGeneration = generation
+                        observeGeneration(generation)
                     }
                     access.maintenance.collectLatest { phase ->
                         if (phase == MaintenanceState.IDLE) {
@@ -127,10 +127,17 @@ class ScheduleViewModel @Inject constructor(
         drainNotification(previous)
     }
 
-    fun openNotificationDetail(id: Long) {
+    fun openNotificationDetail(id: Long, arrivalGeneration: DataGeneration? = null) {
         if (id <= 0L) return
         val sequence = ++notificationSequence
+        notificationGeneration = arrivalGeneration
+        if (arrivalGeneration != null) {
+            // Validate the supplied original tag inside lookup's permit before publishing or deferring.
+            loadNotificationDetail(id, sequence, arrivalGeneration)
+            return
+        }
         val generation = state.value.generation
+        notificationGeneration = generation
         if (generation != null) {
             if (state.value.editor.isOpen) deferNotification(id, sequence, generation)
             else loadNotificationDetail(id, sequence, generation)
@@ -142,6 +149,7 @@ class ScheduleViewModel @Inject constructor(
                 try {
                     val token = access.capture()
                     if (sequence != notificationSequence) return@launch
+                    notificationGeneration = token
                     if (state.value.editor.isOpen) deferNotification(id, sequence, token)
                     else loadNotificationDetail(id, sequence, token)
                 } catch (error: Exception) {
@@ -191,7 +199,7 @@ class ScheduleViewModel @Inject constructor(
 
     private fun deliverNotification(id: Long, sequence: Long, generation: DataGeneration, latest: List<Schedule>) {
         if (sequence != notificationSequence) return
-        publishSnapshot(generation, latest, keepNotification = sequence)
+        publishSnapshot(generation, latest)
         if (sequence != notificationSequence) return
         if (state.value.editor.isOpen) {
             deferNotification(id, sequence, generation)
@@ -350,18 +358,26 @@ class ScheduleViewModel @Inject constructor(
             errorMessage = "读取数据世代失败，请重新启动应用并检查数据") }
     }
 
-    private fun publishSnapshot(token: DataGeneration, schedules: List<Schedule>, keepNotification: Long? = null) {
+    private fun observeGeneration(token: DataGeneration) {
+        val previous = observedGeneration
+        if (previous != null && token.value < previous.value) return
         if (observedGeneration != null && observedGeneration != token) {
-            // This notification's fixed token has just been admitted. Preserve this current request
-            // when its cold query also invalidates an older, unpublished snapshot context.
-            invalidateSnapshot(preserveNotification = keepNotification != null && keepNotification == notificationSequence)
+            invalidateSnapshot(token)
         }
         observedGeneration = token
+    }
+
+    private fun publishSnapshot(token: DataGeneration, schedules: List<Schedule>) {
+        observeGeneration(token)
         recompose(state.value.copy(generation = token, schedules = schedules, isAvailable = true, isLoading = false))
     }
 
-    private fun invalidateSnapshot(preserveNotification: Boolean = false) {
-        if (!preserveNotification) notificationSequence++
+    private fun invalidateSnapshot(token: DataGeneration) {
+        // Keep a newer fixed-token request across a delayed intermediate observation.
+        if (notificationGeneration?.let { it.value < token.value } != false) {
+            notificationSequence++
+            notificationGeneration = null
+        }
         activeEditorOperation = null
         state.update { it.copy(generation = null, schedules = emptyList(), occurrences = emptyList(),
             editor = ScheduleEditorState(), isAvailable = false, isLoading = true, errorMessage = null) }

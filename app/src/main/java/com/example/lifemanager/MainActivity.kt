@@ -40,6 +40,8 @@ class MainActivity : ComponentActivity() {
             LifeManagerTheme(themeMode = settings.settings?.theme) {
                 CompositionLocalProvider(LocalDateFormat provides (settings.settings?.dateFormat ?: DateFormat.YMD)) {
                     NavGraph(todoViewModel = todoViewModel, settingsViewModel = settingsViewModel,
+                        todoNavigation = todoNavigation, scheduleNavigation = scheduleNavigation,
+                        subscriptionNavigation = subscriptionNavigation,
                         todoRequest = todoRequest, onTodoConsumed = todoNavigation::consume,
                         scheduleViewModel = scheduleViewModel, scheduleRequest = scheduleRequest, onScheduleConsumed = scheduleNavigation::consume,
                         subscriptionRequest = subscriptionRequest, onSubscriptionConsumed = subscriptionNavigation::consume)

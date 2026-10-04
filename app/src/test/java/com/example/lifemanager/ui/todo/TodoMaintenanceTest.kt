@@ -2,6 +2,7 @@ package com.example.lifemanager.ui.todo
 
 import androidx.lifecycle.viewModelScope
 import com.example.lifemanager.domain.maintenance.DataGeneration
+import com.example.lifemanager.domain.maintenance.DataGenerationRepository
 import com.example.lifemanager.domain.maintenance.MaintenanceCoordinator
 import com.example.lifemanager.domain.maintenance.MaintenanceState
 import com.example.lifemanager.domain.model.Tag
@@ -18,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
@@ -212,6 +214,108 @@ class TodoMaintenanceTest {
         assertNull(model.uiState.value.editor.pendingNotificationId)
         assertNull(model.uiState.value.errorMessage)
     } }
+
+    @Test fun providedOldNotificationGenerationCannotOpenOrDeferReusedIdAfterUiRefresh() = runTest { scenario {
+        val originalDataGeneration = access.capture()
+        assertEquals(DataGeneration(7), originalDataGeneration)
+        replace(listOf(original.copy(title = "恢复的新记录")))
+        advanceUntilIdle()
+        assertEquals(DataGeneration(8), model.uiState.value.generation)
+        assertEquals("恢复的新记录", model.uiState.value.todos.single().title)
+
+        model.openNotificationDetail(42, originalDataGeneration)
+        advanceUntilIdle()
+        assertFalse(model.uiState.value.editor.isOpen)
+        assertNull(model.uiState.value.editor.pendingNotificationId)
+
+        model.openEditor(repository.todos.single())
+        model.onTitleChanged("新的未保存草稿")
+        model.openNotificationDetail(42, originalDataGeneration)
+        advanceUntilIdle()
+        assertTrue(model.uiState.value.editor.isOpen)
+        assertEquals("新的未保存草稿", model.uiState.value.editor.title)
+        assertNull(model.uiState.value.editor.pendingNotificationId)
+        model.closeEditor()
+        advanceUntilIdle()
+        assertFalse(model.uiState.value.editor.isOpen)
+        assertNull(model.uiState.value.editor.pendingNotificationId)
+        assertNull(model.uiState.value.errorMessage)
+    } }
+
+    @Test fun providedCurrentNotificationGenerationLoadsReplacementBeforeUiObservesCommit() = runTest { scenario {
+        assertEquals(DataGeneration(7), model.uiState.value.generation)
+        replace(listOf(original.copy(title = "恢复的新记录")))
+        val originalDataGeneration = access.capture()
+        assertEquals(DataGeneration(8), originalDataGeneration)
+        // No dispatcher turn between commit and handoff: the UI still carries generation 7.
+        assertEquals(DataGeneration(7), model.uiState.value.generation)
+        notificationDispatcher.pauseNext = true
+        model.openNotificationDetail(42, originalDataGeneration)
+        assertTrue(notificationDispatcher.hasHeldPublication)
+        advanceUntilIdle() // Observer and fresh snapshot finish before the held lookup starts.
+        assertEquals(DataGeneration(8), model.uiState.value.generation)
+        assertFalse(model.uiState.value.editor.isOpen)
+        notificationDispatcher.resumeHeld()
+        advanceUntilIdle()
+        assertEquals(DataGeneration(8), model.uiState.value.generation)
+        assertTrue(model.uiState.value.editor.isOpen)
+        assertEquals(DataGeneration(8), model.uiState.value.editor.generation)
+        assertEquals(42L, model.uiState.value.editor.editingId)
+        assertEquals("恢复的新记录", model.uiState.value.editor.title)
+        assertNull(model.uiState.value.editor.pendingNotificationId)
+        assertNull(model.uiState.value.errorMessage)
+    } }
+
+    @Test fun providedCurrentNotificationSurvivesGenerationObserverArrivingAfterLookup() = runTest {
+        val observations = MutableStateFlow(DataGeneration(7))
+        scenario(generationObservations = observations) {
+            replace(listOf(original.copy(title = "恢复的新记录")))
+            val originalDataGeneration = access.capture()
+            assertEquals(DataGeneration(8), originalDataGeneration)
+            assertEquals(DataGeneration(7), model.uiState.value.generation)
+            model.openNotificationDetail(42, originalDataGeneration)
+            advanceUntilIdle() // Lookup and Main delivery run while the observer still emits 7.
+            assertTrue(model.uiState.value.editor.isOpen)
+            assertEquals(DataGeneration(8), model.uiState.value.editor.generation)
+            assertEquals(42L, model.uiState.value.editor.editingId)
+            assertEquals("恢复的新记录", model.uiState.value.editor.title)
+
+            observations.value = DataGeneration(8)
+            advanceUntilIdle()
+            assertEquals(DataGeneration(8), model.uiState.value.generation)
+            assertTrue(model.uiState.value.editor.isOpen)
+            assertEquals(DataGeneration(8), model.uiState.value.editor.generation)
+            assertEquals(42L, model.uiState.value.editor.editingId)
+            assertEquals("恢复的新记录", model.uiState.value.editor.title)
+            assertNull(model.uiState.value.editor.pendingNotificationId)
+            assertNull(model.uiState.value.errorMessage)
+        }
+    }
+
+    @Test fun intermediateObservationCannotCancelAQueuedNewerGenerationNotification() = runTest {
+        val observations = MutableStateFlow(DataGeneration(7))
+        scenario(generationObservations = observations) {
+            replace(listOf(original.copy(title = "中间记录")))
+            replace(listOf(original.copy(title = "最新记录")))
+            val originalDataGeneration = access.capture()
+            assertEquals(DataGeneration(9), originalDataGeneration)
+            assertEquals(DataGeneration(7), model.uiState.value.generation)
+            notificationDispatcher.pauseNext = true
+            model.openNotificationDetail(42, originalDataGeneration)
+            assertTrue(notificationDispatcher.hasHeldPublication)
+            observations.value = DataGeneration(8)
+            advanceUntilIdle() // Intermediate context arrives while the generation-9 lookup is held.
+            notificationDispatcher.resumeHeld()
+            advanceUntilIdle()
+            observations.value = DataGeneration(9)
+            advanceUntilIdle()
+            assertEquals(DataGeneration(9), model.uiState.value.generation)
+            assertTrue(model.uiState.value.editor.isOpen)
+            assertEquals(DataGeneration(9), model.uiState.value.editor.generation)
+            assertEquals("最新记录", model.uiState.value.editor.title)
+            assertNull(model.uiState.value.editor.pendingNotificationId)
+        }
+    }
 
     @Test fun admittedSaveDrainsThroughMainHandoffAndReminderSideEffects() = runTest { scenario {
         repository.saveRelease = CompletableDeferred()
@@ -462,12 +566,14 @@ class TodoMaintenanceTest {
 
     private suspend fun TestScope.scenario(
         loadInitially: Boolean = true,
+        generationObservations: Flow<DataGeneration>? = null,
         body: suspend Fixture.() -> Unit,
     ) {
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
-        val fixture = Fixture()
-        fixture.model = TodoViewModel(fixture.repository, fixture.alarms, dispatcher, fixture.access)
+        val fixture = Fixture(generationObservations)
+        fixture.notificationDispatcher = PausingMainDispatcher(dispatcher)
+        fixture.model = TodoViewModel(fixture.repository, fixture.alarms, fixture.notificationDispatcher, fixture.access)
         try {
             if (loadInitially) advanceUntilIdle()
             fixture.body()
@@ -476,19 +582,24 @@ class TodoMaintenanceTest {
             fixture.repository.lookupRelease?.complete(Unit)
             fixture.repository.coldReadRelease?.complete(Unit)
             fixture.model.viewModelScope.cancel()
+            fixture.notificationDispatcher.resumeHeld()
             advanceUntilIdle()
             Dispatchers.resetMain()
         }
     }
 
-    private class Fixture {
+    private class Fixture(generationObservations: Flow<DataGeneration>? = null) {
         val original = Todo(id = 42, title = "原记录")
         val generations = TestGenerations(7)
-        val coordinator = MaintenanceCoordinator(generations)
-        val access = GenerationAccess(generations, coordinator)
+        private val generationRepository = object : DataGenerationRepository by generations {
+            override fun observe() = generationObservations ?: generations.observe()
+        }
+        val coordinator = MaintenanceCoordinator(generationRepository)
+        val access = GenerationAccess(generationRepository, coordinator)
         val repository = Repository(listOf(original))
         val alarms = Alarms()
         lateinit var model: TodoViewModel
+        lateinit var notificationDispatcher: PausingMainDispatcher
 
         suspend fun replace(values: List<Todo>) {
             coordinator.withSession { session -> coordinator.withMaintenance(session) {

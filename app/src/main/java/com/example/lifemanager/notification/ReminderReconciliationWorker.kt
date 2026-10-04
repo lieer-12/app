@@ -3,53 +3,53 @@ package com.example.lifemanager.notification
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.example.lifemanager.data.local.LifeManagerDatabaseFactory
-import com.example.lifemanager.data.repository.toDomain
-import com.example.lifemanager.domain.usecase.SubscriptionOperationCoordinator
-import com.example.lifemanager.domain.usecase.TodoOperationCoordinator
-import com.example.lifemanager.domain.usecase.ScheduleOperationCoordinator
-import java.time.Instant
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
 
-class ReminderReconciliationWorker(
+class ReminderReconciliationWorker @JvmOverloads constructor(
     appContext: Context,
     workerParams: WorkerParameters,
+    private val reconcilerProvider: (Context) -> ReminderReconciler = { context ->
+        EntryPointAccessors.fromApplication(
+            context.applicationContext, ReminderReconciliationEntryPoint::class.java,
+        ).reminderReconciler()
+    },
 ) : CoroutineWorker(appContext, workerParams) {
     override suspend fun doWork(): Result {
-        val database = LifeManagerDatabaseFactory.open(applicationContext)
         return try {
-            val scheduler = ReminderScheduler(applicationContext)
-            val scheduleScheduler = ScheduleReminderScheduler(applicationContext)
-            val subscriptionScheduler = SubscriptionReminderScheduler(applicationContext)
-            TodoOperationCoordinator.run {
-                database.todoDao().getAll().forEach { todo ->
-                    val dueAt = todo.dueAt
-                    if (todo.isCompleted || dueAt == null) scheduler.cancel(todo.id)
-                    else scheduler.schedule(todo.id, todo.title, Instant.ofEpochMilli(dueAt))
-                }
-            }
-            ScheduleOperationCoordinator.run {
-                database.scheduleDao().getAll().forEach { scheduleScheduler.schedule(it.toDomain()) }
-            }
-            SubscriptionOperationCoordinator.run {
-                val subscriptionDao = database.subscriptionDao()
-                subscriptionDao.getAll().forEach { subscription ->
-                    subscriptionScheduler.schedule(subscription.toDomain(), subscriptionDao.getReminderDays(subscription.id).toSet())
-                }
-            }
+            reconcilerProvider(applicationContext).reconcile()
             Result.success()
+        } catch (error: CancellationException) {
+            throw error
         } catch (_: Exception) {
             Result.retry()
-        } finally {
-            database.close()
         }
     }
 
     companion object {
         private const val WORK_NAME = "todo_reminder_reconciliation"
+        private const val IMMEDIATE_WORK_NAME = "reminder_reconciliation_immediate"
+
+        /**
+         * Fresh serialized passes: an event arriving during RUNNING must not disappear.
+         * No rejected broadcast payload or ID is replayed; each pass reads current Room data.
+         */
+        fun enqueueImmediate(context: Context) {
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                IMMEDIATE_WORK_NAME,
+                ExistingWorkPolicy.APPEND_OR_REPLACE,
+                OneTimeWorkRequestBuilder<ReminderReconciliationWorker>().build(),
+            )
+        }
 
         fun schedule(context: Context) {
             val request = PeriodicWorkRequestBuilder<ReminderReconciliationWorker>(1, TimeUnit.DAYS).build()
@@ -60,4 +60,10 @@ class ReminderReconciliationWorker(
             )
         }
     }
+}
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface ReminderReconciliationEntryPoint {
+    fun reminderReconciler(): ReminderReconciler
 }

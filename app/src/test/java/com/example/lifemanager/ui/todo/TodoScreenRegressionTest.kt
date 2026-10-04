@@ -3,6 +3,8 @@ package com.example.lifemanager.ui.todo
 import android.app.Application
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import com.example.lifemanager.ui.settings.LocalDateFormat
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -27,7 +29,7 @@ import com.example.lifemanager.notification.ScheduleReminderSchedulerContract
 import com.example.lifemanager.ui.schedule.ScheduleViewModel
 import com.example.lifemanager.ui.theme.LifeManagerTheme
 import com.example.lifemanager.ui.navigation.NavGraph
-import com.example.lifemanager.ui.navigation.TodoNavigationRequest
+import com.example.lifemanager.ui.navigation.TodoNavigationViewModel
 import com.example.lifemanager.ui.settings.TestSettingsOwner
 import com.example.lifemanager.ui.common.testGenerationAccess
 import com.example.lifemanager.ui.common.GenerationAccess
@@ -60,10 +62,11 @@ class TodoScreenRegressionTest {
     private lateinit var model: TodoViewModel
     private var scheduleModel: ScheduleViewModel? = null
     private var settingsOwner: TestSettingsOwner? = null
+    private var navigationOwner: TodoNavigationViewModel? = null
     private val oldZone = TimeZone.getDefault()
     private val requestId = mutableStateOf<Long?>(null)
 
-    @After fun cleanup() { if (::model.isInitialized) model.viewModelScope.cancel(); scheduleModel?.viewModelScope?.cancel(); settingsOwner?.close(); TimeZone.setDefault(oldZone) }
+    @After fun cleanup() { if (::model.isInitialized) model.viewModelScope.cancel(); scheduleModel?.viewModelScope?.cancel(); navigationOwner?.viewModelScope?.cancel(); settingsOwner?.close(); TimeZone.setDefault(oldZone) }
 
     @Test fun maintenanceMarksAddTodoFabDisabledWhileKeepingAvailableSnapshot() {
         val generations = TestGenerations(7)
@@ -147,34 +150,43 @@ class TodoScreenRegressionTest {
     }
 
     @Test fun notificationReturningFromSettingsUsesRetainedTodoDraftOwner() {
-        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "通知目标"))), NoAlarms, Dispatchers.IO, testGenerationAccess())
-        val request = mutableStateOf<TodoNavigationRequest?>(null)
-        val schedules = ScheduleViewModel(EmptySchedules(), NoScheduleAlarms, Dispatchers.IO, testGenerationAccess())
+        val access = testGenerationAccess()
+        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "通知目标"))), NoAlarms, Dispatchers.IO, access)
+        val navigation = TodoNavigationViewModel(access, Dispatchers.IO).also { navigationOwner = it }
+        val schedules = ScheduleViewModel(EmptySchedules(), NoScheduleAlarms, Dispatchers.IO, access)
         scheduleModel = schedules
         val settings = TestSettingsOwner().also { settingsOwner = it }
-        compose.setContent { LifeManagerTheme { NavGraph(todoViewModel = model, scheduleViewModel = schedules, settingsViewModel = settings.model, todoRequest = request.value,
-            onTodoConsumed = { token -> if (request.value?.token == token) request.value = null }) } }
+        compose.setContent { LifeManagerTheme {
+            val request by navigation.pending.collectAsState()
+            NavGraph(todoViewModel = model, scheduleViewModel = schedules, settingsViewModel = settings.model,
+                todoRequest = request, todoNavigation = navigation, onTodoConsumed = navigation::consume)
+        } }
         compose.waitForIdle()
         compose.onNode(hasText("设置") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))
             .performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.waitUntil(5000) { compose.onAllNodesWithText("已完成模块").fetchSemanticsNodes().isNotEmpty() }
         waitUntilAvailable()
         // Represents the retained Todo owner while another destination is visible.
-        compose.runOnIdle { model.openEditor(); model.onTitleChanged("跨模块保留的草稿"); request.value = TodoNavigationRequest(1, 42) }
+        compose.runOnIdle { model.openEditor(); model.onTitleChanged("跨模块保留的草稿"); navigation.open(42) }
         compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.editor.pendingNotificationId == 42L }
         assertEquals("跨模块保留的草稿", model.uiState.value.editor.title)
         compose.onNodeWithText("跨模块保留的草稿").assertExists()
     }
 
     @Test fun coldStartWithNotificationWaitsForTheGraphThenOpensTheTarget() {
-        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "冷启动目标"))), NoAlarms, Dispatchers.IO, testGenerationAccess())
-        val schedules = ScheduleViewModel(EmptySchedules(), NoScheduleAlarms, Dispatchers.IO, testGenerationAccess())
+        val access = testGenerationAccess()
+        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "冷启动目标"))), NoAlarms, Dispatchers.IO, access)
+        val navigation = TodoNavigationViewModel(access, Dispatchers.IO).also { navigationOwner = it }
+        val schedules = ScheduleViewModel(EmptySchedules(), NoScheduleAlarms, Dispatchers.IO, access)
         scheduleModel = schedules
         val settings = TestSettingsOwner().also { settingsOwner = it }
         var consumed = false
+        navigation.open(42)
         compose.setContent { LifeManagerTheme {
+            val request by navigation.pending.collectAsState()
             NavGraph(todoViewModel = model, scheduleViewModel = schedules, settingsViewModel = settings.model,
-                todoRequest = TodoNavigationRequest(1, 42), onTodoConsumed = { consumed = true })
+                todoRequest = request, todoNavigation = navigation,
+                onTodoConsumed = { navigation.consume(it); consumed = true })
         } }
         compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.editor.editingId == 42L }
         compose.onNode(hasText("冷启动目标") and hasSetTextAction()).assertExists()

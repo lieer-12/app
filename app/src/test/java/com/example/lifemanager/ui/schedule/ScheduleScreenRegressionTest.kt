@@ -3,6 +3,8 @@ package com.example.lifemanager.ui.schedule
 import android.app.Application
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import com.example.lifemanager.ui.settings.LocalDateFormat
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.*
@@ -14,7 +16,7 @@ import com.example.lifemanager.domain.repository.TodoRepository
 import com.example.lifemanager.notification.ScheduleReminderSchedulerContract
 import com.example.lifemanager.notification.ReminderSchedulerContract
 import com.example.lifemanager.ui.navigation.NavGraph
-import com.example.lifemanager.ui.navigation.ScheduleNavigationRequest
+import com.example.lifemanager.ui.navigation.ScheduleNavigationViewModel
 import com.example.lifemanager.ui.settings.TestSettingsOwner
 import com.example.lifemanager.ui.todo.TodoViewModel
 import com.example.lifemanager.ui.theme.LifeManagerTheme
@@ -45,7 +47,8 @@ class ScheduleScreenRegressionTest {
     private lateinit var model: ScheduleViewModel
     private var todoModel: TodoViewModel? = null
     private var settingsOwner: TestSettingsOwner? = null
-    @After fun cleanup() { if (::model.isInitialized) model.viewModelScope.cancel(); todoModel?.viewModelScope?.cancel(); settingsOwner?.close() }
+    private var navigationOwner: ScheduleNavigationViewModel? = null
+    @After fun cleanup() { if (::model.isInitialized) model.viewModelScope.cancel(); todoModel?.viewModelScope?.cancel(); navigationOwner?.viewModelScope?.cancel(); settingsOwner?.close() }
     @Test fun notificationPreservesDraftBeforeOpeningTarget() {
         model = ScheduleViewModel(Records(), NoAlarms, Dispatchers.IO, testGenerationAccess())
         val request = mutableStateOf<Long?>(null)
@@ -59,21 +62,23 @@ class ScheduleScreenRegressionTest {
         compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.editor.editingId == 42L }
     }
     @Test fun returningFromSettingsUsesRetainedScheduleDraftAndConsumesRequest() {
-        model = ScheduleViewModel(Records(), NoAlarms, Dispatchers.IO, testGenerationAccess())
-        val todos = TodoViewModel(EmptyTodos(), NoTodoAlarms, Dispatchers.IO, testGenerationAccess())
+        val access = testGenerationAccess()
+        model = ScheduleViewModel(Records(), NoAlarms, Dispatchers.IO, access)
+        val navigation = ScheduleNavigationViewModel(access, Dispatchers.IO).also { navigationOwner = it }
+        val todos = TodoViewModel(EmptyTodos(), NoTodoAlarms, Dispatchers.IO, access)
         todoModel = todos
-        val request = mutableStateOf<ScheduleNavigationRequest?>(null)
         val settings = TestSettingsOwner().also { settingsOwner = it }
-        compose.setContent { LifeManagerTheme { NavGraph(todoViewModel = todos, scheduleViewModel = model, settingsViewModel = settings.model,
-            scheduleRequest = request.value, onScheduleConsumed = { token ->
-                if (request.value?.token == token) request.value = null
-            }) } }
+        compose.setContent { LifeManagerTheme {
+            val request by navigation.pending.collectAsState()
+            NavGraph(todoViewModel = todos, scheduleViewModel = model, settingsViewModel = settings.model,
+                scheduleRequest = request, scheduleNavigation = navigation, onScheduleConsumed = navigation::consume)
+        } }
         waitForAvailable()
         compose.onNode(hasText("设置") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))
             .performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.waitUntil(5000) { compose.onAllNodesWithText("已完成模块").fetchSemanticsNodes().isNotEmpty() }
-        compose.runOnIdle { model.openEditor(); model.onTitleChanged("跨模块的日程草稿"); request.value = ScheduleNavigationRequest(1, 42) }
-        compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.editor.pendingNotificationId == 42L && request.value == null }
+        compose.runOnIdle { model.openEditor(); model.onTitleChanged("跨模块的日程草稿"); navigation.open(42) }
+        compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.editor.pendingNotificationId == 42L && navigation.pending.value == null }
         compose.onNodeWithText("跨模块的日程草稿").assertExists()
         compose.onNodeWithText("通知日程等待查看；保存或关闭当前草稿后打开").assertExists()
     }

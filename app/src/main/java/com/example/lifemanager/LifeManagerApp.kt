@@ -11,5 +11,6 @@ class LifeManagerApp : Application() {
         super.onCreate()
         NotificationHelper.createChannel(this)
         ReminderReconciliationWorker.schedule(this)
+        ReminderReconciliationWorker.enqueueImmediate(this)
     }
 }

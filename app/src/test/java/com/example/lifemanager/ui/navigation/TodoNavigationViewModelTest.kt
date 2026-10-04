@@ -1,10 +1,33 @@
 package com.example.lifemanager.ui.navigation
 
+import androidx.lifecycle.viewModelScope
+import com.example.lifemanager.ui.common.testGenerationAccess
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
+import org.junit.After
+import org.junit.Before
 import kotlin.test.*
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class TodoNavigationViewModelTest {
+    private lateinit var model: TodoNavigationViewModel
+
+    @Before fun setup() {
+        val dispatcher = UnconfinedTestDispatcher()
+        Dispatchers.setMain(dispatcher)
+        model = TodoNavigationViewModel(testGenerationAccess(), dispatcher)
+    }
+
+    @After fun cleanup() {
+        if (::model.isInitialized) model.viewModelScope.cancel()
+        Dispatchers.resetMain()
+    }
+
     @Test fun consumedNotificationDoesNotReplayOnRotation() {
-        val model = TodoNavigationViewModel()
         model.open(42)
         val request = assertNotNull(model.pending.value)
         assertEquals(42L, request.todoId)
@@ -12,7 +35,6 @@ class TodoNavigationViewModelTest {
         assertNull(model.pending.value)
     }
     @Test fun repeatedTapIsNewEventAndOldAcknowledgementCannotConsumeIt() {
-        val model = TodoNavigationViewModel()
         model.open(42)
         val first = assertNotNull(model.pending.value)
         model.open(42)
@@ -22,7 +44,6 @@ class TodoNavigationViewModelTest {
         assertEquals(second, model.pending.value)
     }
     @Test fun invalidIdDoesNotReplacePendingNotification() {
-        val model = TodoNavigationViewModel()
         model.open(42)
         val request = model.pending.value
         model.open(0)

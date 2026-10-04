@@ -48,6 +48,7 @@ class SubscriptionViewModel @Inject constructor(
     private var editorSession = 0L
     private var detailRequest = 0L
     private var notificationRequest = 0L
+    private var notificationGeneration: DataGeneration? = null
     private var exportRequest = 0L
     private var activeMutation: Any? = null
     private data class NotificationRequest(val id: Long, val generation: DataGeneration, val request: Long)
@@ -65,8 +66,7 @@ class SubscriptionViewModel @Inject constructor(
                 try {
                     access.generations.collectLatest { generation ->
                         withContext(Dispatchers.Main.immediate) {
-                            if (observedGeneration != null && observedGeneration != generation) invalidateSnapshot()
-                            observedGeneration = generation
+                            observeGeneration(generation)
                         }
                         access.maintenance.collectLatest { phase ->
                             if (phase == MaintenanceState.IDLE) reload.collectLatest { observeSnapshot(generation) }
@@ -85,8 +85,7 @@ class SubscriptionViewModel @Inject constructor(
             // Long-lived streams only invalidate; their possibly buffered DTOs are never published.
             combine(repository.observeSubscriptions().map { Unit }, repository.observeAllPayments().map { Unit }) { _, _ -> Unit }.collect {
                 access.read({ repository.observeSubscriptions().first() to repository.observeAllPayments().first() }) { token, (list, payments) ->
-                    if (observedGeneration != token) invalidateSnapshot()
-                    observedGeneration = token
+                    observeGeneration(token)
                     generationFailed = false
                     val today = LocalDate.now()
                     val stats = try { SubscriptionRules.calculateStats(list, payments, today) } catch (_: ArithmeticException) { null }
@@ -106,10 +105,21 @@ class SubscriptionViewModel @Inject constructor(
         }
     }
 
-    private fun invalidateSnapshot() {
+    private fun observeGeneration(token: DataGeneration) {
+        val previous = observedGeneration
+        if (previous != null && token.value < previous.value) return
+        if (previous != null && previous != token) invalidateSnapshot(token)
+        observedGeneration = token
+    }
+
+    private fun invalidateSnapshot(token: DataGeneration) {
         editorSession++
         detailRequest++
-        notificationRequest++
+        // Page invalidation and notification invalidation have different generation boundaries.
+        if (notificationGeneration?.let { it.value < token.value } != false) {
+            notificationRequest++
+            notificationGeneration = null
+        }
         activeMutation = null
         pendingNotification = null
         exportSnapshot = null
@@ -163,14 +173,18 @@ class SubscriptionViewModel @Inject constructor(
     }
 
     /** External intent protection is separate; the VM's lookup and deferred target retain their arrival token. */
-    fun openNotificationDetail(id: Long) {
+    fun openNotificationDetail(id: Long, arrivalGeneration: DataGeneration? = null) {
+        if (id <= 0L) return
         val request = ++notificationRequest
-        val arrivalGeneration = controls.value.generation ?: observedGeneration
-        if (arrivalGeneration != null) launchNotification(NotificationRequest(id, arrivalGeneration, request))
+        val original = arrivalGeneration ?: controls.value.generation ?: observedGeneration
+        notificationGeneration = original
+        if (original != null) launchNotification(NotificationRequest(id, original, request))
         else viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 // Enter capture before the first suspension so maintenance drains the cold-start metadata read.
                 val token = access.capture()
+                if (notificationRequest != request) return@launch
+                notificationGeneration = token
                 launchNotification(NotificationRequest(id, token, request))
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
@@ -197,6 +211,7 @@ class SubscriptionViewModel @Inject constructor(
             try {
                 access.run(target.generation) {
                     val deferred = withContext(Dispatchers.Main.immediate) {
+                        observeGeneration(target.generation)
                         if (notificationRequest != target.request) true
                         else if (controls.value.editor.isOpen || controls.value.paymentEditor.isOpen) {
                             pendingNotification = target

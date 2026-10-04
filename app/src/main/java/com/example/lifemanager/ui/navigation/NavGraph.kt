@@ -43,7 +43,13 @@ fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
     modifier: Modifier = Modifier, todoRequest: TodoNavigationRequest? = null,
     onTodoConsumed: (Long) -> Unit = {},
     scheduleRequest: ScheduleNavigationRequest? = null, onScheduleConsumed: (Long) -> Unit = {},
-    subscriptionRequest: SubscriptionNavigationRequest? = null, onSubscriptionConsumed: (Long) -> Unit = {}) {
+    subscriptionRequest: SubscriptionNavigationRequest? = null, onSubscriptionConsumed: (Long) -> Unit = {},
+    todoNavigation: TodoNavigationViewModel? = null,
+    scheduleNavigation: ScheduleNavigationViewModel? = null,
+    subscriptionNavigation: SubscriptionNavigationViewModel? = null) {
+    require(todoRequest == null || todoNavigation != null) { "待办通知必须由导航所有者交付" }
+    require(scheduleRequest == null || scheduleNavigation != null) { "日程通知必须由导航所有者交付" }
+    require(subscriptionRequest == null || subscriptionNavigation != null) { "订阅通知必须由导航所有者交付" }
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
@@ -56,21 +62,24 @@ fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
     )
 
     LaunchedEffect(scheduleRequest?.token) {
-        if (scheduleRequest != null) {
-            navController.currentBackStackEntryFlow.first()
-            navController.navigate(ScheduleRoute) { launchSingleTop = true }
+        scheduleRequest?.let { request ->
+            requireNotNull(scheduleNavigation).deliver(request, { navController.currentBackStackEntryFlow.first(); Unit }) {
+                navController.navigate(ScheduleRoute) { launchSingleTop = true }
+            }
         }
     }
     LaunchedEffect(todoRequest?.token) {
-        if (todoRequest != null) {
-            navController.currentBackStackEntryFlow.first()
-            navController.navigate(TodoRoute) { launchSingleTop = true }
+        todoRequest?.let { request ->
+            requireNotNull(todoNavigation).deliver(request, { navController.currentBackStackEntryFlow.first(); Unit }) {
+                navController.navigate(TodoRoute) { launchSingleTop = true }
+            }
         }
     }
     LaunchedEffect(subscriptionRequest?.token) {
-        if (subscriptionRequest != null) {
-            navController.currentBackStackEntryFlow.first()
-            navController.navigate(SubscriptionRoute) { launchSingleTop = true }
+        subscriptionRequest?.let { request ->
+            requireNotNull(subscriptionNavigation).deliver(request, { navController.currentBackStackEntryFlow.first(); Unit }) {
+                navController.navigate(SubscriptionRoute) { launchSingleTop = true }
+            }
         }
     }
 
@@ -99,6 +108,7 @@ fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
                     viewModel = todoViewModel,
                     initialTodoId = todoRequest?.todoId,
                     notificationToken = todoRequest?.token,
+                    initialNotificationGeneration = todoRequest?.originalDataGeneration,
                     onNotificationConsumed = onTodoConsumed,
                     onOpenSettings = { navController.navigate(SettingsRoute) },
                 )
@@ -108,6 +118,7 @@ fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
                     viewModel = scheduleViewModel,
                     initialScheduleId = scheduleRequest?.scheduleId,
                     notificationToken = scheduleRequest?.token,
+                    initialNotificationGeneration = scheduleRequest?.originalDataGeneration,
                     onNotificationConsumed = onScheduleConsumed,
                 )
             }
@@ -118,7 +129,7 @@ fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
                 val viewModel: SubscriptionViewModel = hiltViewModel()
                 LaunchedEffect(subscriptionRequest?.token) {
                     subscriptionRequest?.let { request ->
-                        viewModel.openNotificationDetail(request.subscriptionId)
+                        viewModel.openNotificationDetail(request.subscriptionId, request.originalDataGeneration)
                         onSubscriptionConsumed(request.token)
                     }
                 }

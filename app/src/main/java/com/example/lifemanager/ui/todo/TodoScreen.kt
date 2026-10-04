@@ -59,6 +59,7 @@ import com.example.lifemanager.domain.model.Todo
 import com.example.lifemanager.domain.model.TodoDateFilter
 import com.example.lifemanager.domain.model.TodoFilter
 import com.example.lifemanager.domain.model.TodoPriority
+import com.example.lifemanager.domain.maintenance.DataGeneration
 import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
@@ -73,6 +74,7 @@ fun TodoScreen(
     onNotificationConsumed: (Long) -> Unit = {},
     onOpenSettings: () -> Unit,
     viewModel: TodoViewModel = hiltViewModel(),
+    initialNotificationGeneration: DataGeneration? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val renderedGeneration = state.generation
@@ -80,8 +82,8 @@ fun TodoScreen(
     val controlsEnabled = state.isAvailable && !state.isMaintaining
     val renderedFilter = state.filter
     var showSearch by remember { mutableStateOf(false) }
-    LaunchedEffect(initialTodoId, notificationToken) {
-        initialTodoId?.let(viewModel::openNotificationDetail)
+    LaunchedEffect(initialTodoId, notificationToken, initialNotificationGeneration) {
+        initialTodoId?.let { viewModel.openNotificationDetail(it, initialNotificationGeneration) }
         notificationToken?.let(onNotificationConsumed)
     }
 

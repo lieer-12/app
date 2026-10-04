@@ -15,6 +15,7 @@ import com.example.lifemanager.domain.repository.SubscriptionRepository
 import com.example.lifemanager.domain.usecase.SubscriptionOperationCoordinator
 import com.example.lifemanager.notification.SubscriptionReminderSchedulerContract
 import com.example.lifemanager.ui.common.GenerationAccess
+import com.example.lifemanager.ui.common.PausingMainDispatcher
 import com.example.lifemanager.ui.common.TestGenerations
 import java.time.Instant
 import java.time.LocalDate
@@ -424,6 +425,103 @@ class SubscriptionMaintenanceTest {
         assertTrue(model.uiState.value.detailReminderDays.isEmpty())
     }
 
+    @Test fun providedOldNotificationGenerationCannotOpenOrDeferReusedIdAfterUiRefresh() = scenario {
+        val originalDataGeneration = access.capture()
+        assertEquals(DataGeneration(11), originalDataGeneration)
+        replace()
+        advanceUntilIdle()
+        assertEquals(DataGeneration(12), model.uiState.value.generation)
+        assertEquals("replacement target", model.uiState.value.subscriptions.first { it.id == 2L }.appName)
+
+        model.openNotificationDetail(2, originalDataGeneration)
+        advanceUntilIdle()
+        assertNull(model.uiState.value.detailId)
+        assertNull(model.uiState.value.pendingNotificationId)
+        assertTrue(model.uiState.value.detailReminderDays.isEmpty())
+
+        subscriptionDraft()
+        model.openNotificationDetail(2, originalDataGeneration)
+        advanceUntilIdle()
+        assertTrue(model.uiState.value.editor.isOpen)
+        assertEquals("draft", model.uiState.value.editor.name)
+        assertNull(model.uiState.value.detailId)
+        assertNull(model.uiState.value.pendingNotificationId)
+        model.closeEditor()
+        advanceUntilIdle()
+        assertNull(model.uiState.value.detailId)
+        assertNull(model.uiState.value.pendingNotificationId)
+        assertTrue(model.uiState.value.detailReminderDays.isEmpty())
+        assertNull(model.uiState.value.errorMessage)
+    }
+
+    @Test fun providedCurrentNotificationGenerationLoadsReplacementBeforeUiObservesCommit() = scenario {
+        assertEquals(DataGeneration(11), model.uiState.value.generation)
+        replace()
+        val originalDataGeneration = access.capture()
+        assertEquals(DataGeneration(12), originalDataGeneration)
+        // No dispatcher turn between commit and handoff: the UI still carries generation 11.
+        assertEquals(DataGeneration(11), model.uiState.value.generation)
+        notificationDispatcher.pauseNext = true
+        model.openNotificationDetail(2, originalDataGeneration)
+        assertTrue(notificationDispatcher.hasHeldPublication)
+        advanceUntilIdle() // Observer and fresh snapshot finish before the held lookup starts.
+        assertEquals(DataGeneration(12), model.uiState.value.generation)
+        assertNull(model.uiState.value.detailId)
+        notificationDispatcher.resumeHeld()
+        advanceUntilIdle()
+        assertEquals(DataGeneration(12), model.uiState.value.generation)
+        assertEquals("replacement target", model.uiState.value.subscriptions.first { it.id == 2L }.appName)
+        assertEquals(2L, model.uiState.value.detailId)
+        assertEquals(setOf(3), model.uiState.value.detailReminderDays)
+        assertNull(model.uiState.value.pendingNotificationId)
+        assertNull(model.uiState.value.errorMessage)
+    }
+
+    @Test fun providedCurrentNotificationSurvivesGenerationObserverArrivingAfterLookup() = scenario(
+        generationObservations = MutableStateFlow(DataGeneration(11)),
+    ) {
+        replace(notifyObservers = false)
+        val originalDataGeneration = access.capture()
+        assertEquals(DataGeneration(12), originalDataGeneration)
+        assertEquals(DataGeneration(11), model.uiState.value.generation)
+        model.openNotificationDetail(2, originalDataGeneration)
+        advanceUntilIdle() // Lookup and Main delivery run while the observer still emits 11.
+        assertEquals(2L, model.uiState.value.detailId)
+        assertEquals(setOf(3), model.uiState.value.detailReminderDays)
+
+        checkNotNull(generationObservations).value = DataGeneration(12)
+        advanceUntilIdle()
+        assertEquals(DataGeneration(12), model.uiState.value.generation)
+        assertEquals("replacement target", model.uiState.value.subscriptions.first { it.id == 2L }.appName)
+        assertEquals(2L, model.uiState.value.detailId)
+        assertEquals(setOf(3), model.uiState.value.detailReminderDays)
+        assertNull(model.uiState.value.pendingNotificationId)
+        assertNull(model.uiState.value.errorMessage)
+    }
+
+    @Test fun intermediateObservationCannotCancelAQueuedNewerGenerationNotification() = scenario(
+        generationObservations = MutableStateFlow(DataGeneration(11)),
+    ) {
+        replace(notifyObservers = false)
+        replace(notifyObservers = false)
+        val originalDataGeneration = access.capture()
+        assertEquals(DataGeneration(13), originalDataGeneration)
+        assertEquals(DataGeneration(11), model.uiState.value.generation)
+        notificationDispatcher.pauseNext = true
+        model.openNotificationDetail(2, originalDataGeneration)
+        assertTrue(notificationDispatcher.hasHeldPublication)
+        checkNotNull(generationObservations).value = DataGeneration(12)
+        advanceUntilIdle()
+        notificationDispatcher.resumeHeld()
+        advanceUntilIdle()
+        generationObservations.value = DataGeneration(13)
+        advanceUntilIdle()
+        assertEquals(DataGeneration(13), model.uiState.value.generation)
+        assertEquals(2L, model.uiState.value.detailId)
+        assertEquals(setOf(3), model.uiState.value.detailReminderDays)
+        assertNull(model.uiState.value.pendingNotificationId)
+    }
+
     @Test fun notificationLookupDrainsWithItsPublicationBeforeReplacementIsAllowed() = scenario {
         val days = CompletableDeferred<Set<Int>>()
         repository.reminderRead = { days.await() }
@@ -541,20 +639,23 @@ class SubscriptionMaintenanceTest {
 
     private fun scenario(
         startLoaded: Boolean = true,
+        generationObservations: MutableStateFlow<DataGeneration>? = null,
         configure: Fixture.() -> Unit = {},
         block: suspend Fixture.() -> Unit,
     ) = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val mainDispatcher = PublicationDispatcher(dispatcher)
         Dispatchers.setMain(mainDispatcher)
-        val fixture = Fixture(this, mainDispatcher)
+        val fixture = Fixture(this, mainDispatcher, generationObservations)
+        fixture.notificationDispatcher = PausingMainDispatcher(dispatcher)
         fixture.configure()
-        fixture.model = SubscriptionViewModel(fixture.repository, fixture.scheduler, fixture.preferences, dispatcher, fixture.access)
+        fixture.model = SubscriptionViewModel(fixture.repository, fixture.scheduler, fixture.preferences, fixture.notificationDispatcher, fixture.access)
         try {
             if (startLoaded) advanceUntilIdle()
             fixture.block()
         } finally {
             fixture.model.viewModelScope.cancel()
+            fixture.notificationDispatcher.resumeHeld()
             fixture.jobs.forEach { it.cancel() }
             mainDispatcher.release()
             advanceUntilIdle()
@@ -579,11 +680,16 @@ class SubscriptionMaintenanceTest {
         }
     }
 
-    private class Fixture(val scope: TestScope, val mainDispatcher: PublicationDispatcher) {
+    private class Fixture(
+        val scope: TestScope,
+        val mainDispatcher: PublicationDispatcher,
+        val generationObservations: MutableStateFlow<DataGeneration>? = null,
+    ) {
         val generations = TestGenerations(11)
         var generationRead: (suspend () -> DataGeneration)? = null
         private val generationRepository = object : DataGenerationRepository by generations {
             override suspend fun current(): DataGeneration = generationRead?.invoke() ?: generations.current()
+            override fun observe() = generationObservations ?: generations.observe()
         }
         val coordinator = MaintenanceCoordinator(generationRepository)
         val access = GenerationAccess(generationRepository, coordinator)
@@ -592,6 +698,7 @@ class SubscriptionMaintenanceTest {
         val scheduler = Scheduler()
         val jobs = mutableListOf<Job>()
         lateinit var model: SubscriptionViewModel
+        lateinit var notificationDispatcher: PausingMainDispatcher
         fun runCurrent() = scope.runCurrent()
         fun advanceUntilIdle() = scope.advanceUntilIdle()
         fun trackedLaunch(block: suspend () -> Unit): Job = scope.launch { block() }.also { jobs += it }
@@ -612,10 +719,13 @@ class SubscriptionMaintenanceTest {
             coordinator.withSession { runCurrent(); block() }
         }
 
-        suspend fun replace(active: Boolean = true) {
+        suspend fun replace(active: Boolean = true, notifyObservers: Boolean = true) {
             coordinator.withSession { session ->
                 coordinator.withMaintenance(session) {
-                    generations.commit(session.generation) { repository.replaceRows(active); repository.invalidate() }
+                    generations.commit(session.generation) {
+                        repository.replaceRows(active)
+                        if (notifyObservers) repository.invalidate()
+                    }
                 }
             }
         }

@@ -75,6 +75,7 @@ class TodoViewModel @Inject constructor(
     val uiState = state.asStateFlow()
     private val filter = MutableStateFlow(TodoFilter())
     private val notificationSequence = AtomicLong()
+    private var notificationGeneration: DataGeneration? = null
     // These labels and snapshots are owned by Main, including the error fallback checks.
     private var observedGeneration: DataGeneration? = null
     private var allSnapshot = emptyList<Todo>()
@@ -140,8 +141,14 @@ class TodoViewModel @Inject constructor(
 
     private fun observeGeneration(token: DataGeneration) {
         val previous = observedGeneration ?: state.value.generation ?: state.value.editor.generation
+        // A context queued before a newer admitted Main publication cannot roll it back.
+        if (previous != null && token.value < previous.value) return
         if (previous != null && previous != token) {
-            notificationSequence.incrementAndGet()
+            // An intermediate observation may invalidate the page, not a newer tagged request.
+            if (notificationGeneration?.let { it.value < token.value } != false) {
+                notificationSequence.incrementAndGet()
+                notificationGeneration = null
+            }
             allSnapshot = emptyList()
             activeSaveOperation = null
             state.update { TodoUiState(filter = it.filter, isMaintaining = it.isMaintaining) }
@@ -180,18 +187,30 @@ class TodoViewModel @Inject constructor(
         drainNotification(previous)
     }
 
-    fun openNotificationDetail(id: Long) {
+    fun openNotificationDetail(id: Long, arrivalGeneration: DataGeneration? = null) {
         if (id <= 0L) return
         val request = notificationSequence.incrementAndGet()
+        notificationGeneration = arrivalGeneration
+        if (arrivalGeneration != null) {
+            // Activity's original tag must reach lookup and deferral unchanged, even if UI observation lags.
+            loadNotificationDetail(id, request, arrivalGeneration)
+            return
+        }
         // Activity may deliver and consume a cold-start request before any UI snapshot.
         // Capture once, then retain that same token through lookup, deferral and drain.
         val published = state.value.generation ?: observedGeneration
+        notificationGeneration = published
         if (published == null) {
             if (access.maintenance.value != MaintenanceState.IDLE) return
             viewModelScope.launch(dispatcher, start = CoroutineStart.UNDISPATCHED) {
                 try {
                     val token = access.capture()
-                    if (request == notificationSequence.get()) loadNotificationDetail(id, request, token)
+                    withContext(Dispatchers.Main.immediate) {
+                        if (request == notificationSequence.get()) {
+                            notificationGeneration = token
+                            loadNotificationDetail(id, request, token)
+                        }
+                    }
                 } catch (error: Exception) {
                     if (error is CancellationException) throw error
                     withContext(Dispatchers.Main.immediate) {
@@ -232,6 +251,7 @@ class TodoViewModel @Inject constructor(
                         access.run(token) {
                             val target = repository.getAllTodos().firstOrNull { it.id == id }
                             withContext(Dispatchers.Main.immediate) {
+                                observeGeneration(token)
                                 if (request != notificationSequence.get()) return@withContext
                                 val current = state.value.editor
                                 if (current.isOpen) {

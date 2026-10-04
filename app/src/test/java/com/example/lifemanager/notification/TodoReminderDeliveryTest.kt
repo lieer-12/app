@@ -31,10 +31,12 @@ import kotlin.test.assertEquals
 class TodoReminderDeliveryTest {
     private lateinit var database: LifeManagerDatabase
     private lateinit var repository: TodoRepositoryImpl
+    private lateinit var admission: ReminderAdmissionFixture
     private val context get() = RuntimeEnvironment.getApplication()
     @Before fun setup() {
         database = Room.inMemoryDatabaseBuilder(context, LifeManagerDatabase::class.java).build()
         repository = TodoRepositoryImpl(database)
+        admission = ReminderAdmissionFixture()
     }
     @After fun cleanup() { database.close() }
 
@@ -113,7 +115,7 @@ class TodoReminderDeliveryTest {
         val observedRepository = object : TodoRepository by repository {
             override suspend fun getAllTodos(): List<Todo> = repository.getAllTodos().also { readCompleted.set(true) }
         }
-        val receiver = TodoReminderReceiver({ observedRepository }, StandardTestDispatcher(testScheduler))
+        val receiver = admission.todoReceiver(observedRepository, StandardTestDispatcher(testScheduler))
         receiver.onReceive(context, Intent().setData(Uri.parse("lifemanager://todo-reminder/$id"))
             .putExtra("todo_id", id).putExtra("todo_title", "旧标题").putExtra("todo_due_at", due.toEpochMilli()))
     }

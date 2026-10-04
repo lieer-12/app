@@ -4,6 +4,9 @@ import android.content.Intent
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -55,7 +58,11 @@ class ScheduleNotificationActivityTest {
 
     private fun openDraft() {
         compose.onNode(hasText("日程") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).performClick()
-        compose.onNodeWithContentDescription("添加日程").performClick()
+        // Wait for Room-backed availability, not only the presence of a disabled FAB.
+        compose.waitUntil(5000) {
+            compose.onAllNodes(hasContentDescription("添加日程") and isEnabled()).fetchSemanticsNodes().size == 1
+        }
+        compose.onNodeWithContentDescription("添加日程").assertIsEnabled().performClick()
         compose.onNodeWithText("标题").performTextInput("仅用于测试的未保存日程草稿")
     }
 

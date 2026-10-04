@@ -74,14 +74,15 @@ fun ScheduleScreen(
     notificationToken: Long? = null,
     onNotificationConsumed: (Long) -> Unit = {},
     viewModel: ScheduleViewModel = hiltViewModel(),
+    initialNotificationGeneration: DataGeneration? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val renderedGeneration = state.generation
     val editorGeneration = state.editor.generation
     val available = state.isAvailable && !state.isMaintaining
-    LaunchedEffect(initialScheduleId, notificationToken) {
+    LaunchedEffect(initialScheduleId, notificationToken, initialNotificationGeneration) {
         initialScheduleId?.takeIf { it > 0L }?.let { id ->
-            viewModel.openNotificationDetail(id)
+            viewModel.openNotificationDetail(id, initialNotificationGeneration)
             notificationToken?.let(onNotificationConsumed)
         }
     }
