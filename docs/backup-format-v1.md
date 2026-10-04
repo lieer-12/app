@@ -67,6 +67,8 @@ INTEGER/Long 值验证 0–7，不能将不兼容整数截断成合法选项。
 
 文件包含明文个人数据。最终 UI 必须提示隐私风险，文件输出必须关闭并重新读取验证
 后才报告成功；上述文件闭环、保护备份和恢复事务不在本批编解码器中实现。
+第七批文件适配与导出 / 输入预览的底层契约见 [文件安全说明](backup-file-safety.md)；
+设置文件选择器、保护备份与数据库恢复仍未开放或完成验收。
 
 实现参考：[Kotlin JSON 树 API](https://kotlinlang.org/api/kotlinx.serialization/kotlinx-serialization-json/)
 和 [1.8.1 字符串转义规范实现](https://github.com/Kotlin/kotlinx.serialization/blob/v1.8.1/formats/json/commonMain/src/kotlinx/serialization/json/internal/StringOps.kt)。

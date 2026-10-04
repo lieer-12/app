@@ -16,6 +16,10 @@ import com.example.lifemanager.data.backup.BackupRepositoryImpl
 import com.example.lifemanager.domain.backup.BackupRepository
 import com.example.lifemanager.domain.backup.BackupCodec
 import com.example.lifemanager.data.backup.BackupJsonCodec
+import com.example.lifemanager.data.backup.AndroidBackupFileStore
+import com.example.lifemanager.domain.backup.BackupFileStore
+import com.example.lifemanager.domain.backup.BackupFileUseCases
+import com.example.lifemanager.domain.maintenance.MaintenanceCoordinator
 import com.example.lifemanager.notification.ReminderScheduler
 import com.example.lifemanager.notification.ReminderSchedulerContract
 import com.example.lifemanager.notification.ScheduleReminderScheduler
@@ -69,6 +73,10 @@ abstract class AppModule {
     @Singleton
     abstract fun bindBackupRepository(impl: BackupRepositoryImpl): BackupRepository
 
+    @Binds
+    @Singleton
+    abstract fun bindBackupFileStore(impl: AndroidBackupFileStore): BackupFileStore
+
 }
 
 @Module
@@ -77,6 +85,15 @@ object ProviderModule {
     @Provides
     @Singleton
     fun provideBackupCodec(): BackupCodec = BackupJsonCodec()
+
+    @Provides
+    fun provideBackupFileUseCases(
+        repository: BackupRepository,
+        codec: BackupCodec,
+        files: BackupFileStore,
+        maintenance: MaintenanceCoordinator,
+        @IoDispatcher dispatcher: CoroutineDispatcher,
+    ): BackupFileUseCases = BackupFileUseCases(repository, codec, files, maintenance, dispatcher)
 
     @Provides
     @Singleton

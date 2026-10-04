@@ -454,3 +454,96 @@ verification-before-completion 要求修正后完整重跑，再记录通过和�
 仍可能按到达时的新世代执行。下一批必须在 scheduler / broadcast / 点击 Intent 源头绑定
 世代，并补齐日程 Room 资格及总开关检查。维护退出后的成功 / 取消 / 失败校准闭环、
 真实 SAF 文件恢复及进程死亡仍待后续；不把合成事务当成用户备份恢复。
+
+### 第七批：文件导出和私有输入预览底层（2026-10-04，局部验收通过）
+
+承接 `7f9829b`，只实现 Task 5 的文件基础子批。settings ViewModel / 系统选择器
+尚未接入，不增加按钮、空页面或样例业务记录。没有数据库恢复 / 清空入口或执行 API，
+保护备份和二次确认不会被绕过。详细契约及后续必做见 `backup-file-safety.md`。
+
+已实现且最终完整验证通过：
+
+- domain 文件端口、真实预览计数和导出用例；data 的 Android ContentResolver 流，
+  Hilt 绑定现有备份仓库、codec、全局维护协调器与 IO dispatcher。
+- 原世代普通许可只覆盖一致 Room 快照，外部文件 IO / 编解码在许可及数据库事务外。
+  输出 flush / close 后必须受限重读、全量校验并匹配本次文档，才返回成功。
+- 只接受系统 `content:` 文档；`wt` 请求截断。不信任声明大小或 available，
+  按实读字节限制 64 MiB；第一个超限字节不写进临时文件，零进展读取不会忙等。
+- 输入先进入私有 cache 随机临时文件，关流后校验；成功、错误、取消 finally
+  只清理确切 owned 文件。取消不包装为普通错误，不删除用户的输入或输出文档。
+
+开发时先写测试和可编译的未实现脚手架，三个定向命令依次实际运行：
+用例 13 / 流适配 20 / ContentResolver 3 项全失败，均为运行时未实现异常，
+不是既有生产缺陷的回归 RED、不是编译错误。脚手架随后全部替换，未进入提交。
+首次联合 36 项为 34 通过、2 失败：Robolectric provider 创建时 authority 为 null，
+以及协程栈恢复复制异常导致 assertSame 失效。根据实际 XML / SDK 调用链 / 本地
+Robolectric API 定位后，只修正装置 authority 与异常传播断言；不调整生产保护。
+另外一次命令把 --tests 置于 Android 任务后，Gradle 配置即失败，不计为行为 RED。
+
+修正后定向命令：
+
+```powershell
+$env:JAVA_HOME='D:\jdk'
+$env:ANDROID_SERIAL='emulator-5556'
+.\.tools\gradle-9.4.1\bin\gradle.bat :app:testDebugUnitTest `
+  --tests '*BackupFileUseCasesTest' --tests '*AndroidBackupFileStoreTest' `
+  --tests '*ContentResolverBackupStreamsTest' :app:connectedDebugAndroidTest `
+  '-Pandroid.testInstrumentationRunnerArguments.class=com.example.lifemanager.data.backup.BackupFilesDeviceTest' `
+  --offline --console=plain
+```
+
+BUILD SUCCESSFUL，43 秒；XML 36 项 JVM / 3 套件与 API 35 的 2 项设备回归通过，
+无 failure / error / skipped。设备用真实 Downloads provider（不是 SAF 选择器），
+独立合成 Room 库验证十表 75 字段、设置和 Long 往返，原库 / 本机世代不变；损坏或
+已删除文档明确拒绝且不残留本次临时文件。只插入未发布合成文档，finally 删除确切
+返回 URI；不访问真实用户库，不清应用数据、不新增生产测试 provider。
+
+上述定向结果之后继续完整五任务和独立审查，没有据此提前提交。本批及 Phase 5 未推送，
+UI 改版未开始。恢复 / 清空事务、保护备份去重 / 二次确认、维护退出提醒校准、
+Task 6 完整载荷 / 偏好保护、强制杀进程后的临时区清理 / 状态重置仍待后续。
+流取消为协作式检查，不承诺即时打断阻塞 provider；64 MiB 不等于峰值内存，
+也没有真实磁盘耗尽 / 云 provider / 文件选择器 / 用户数据库恢复或进程死亡验收。
+
+第一轮完整五任务随后 BUILD SUCCESSFUL（1 分 20 秒）：566 JVM / 55 套件、
+34 设备 / 17 套件，均无 failure / error / skipped，仪器执行 34.121 秒。
+lint 实际报告 0 error / 28 warning，未新增 suppress；debug / 测试 APK 构建成功。
+独立审查未发现 Critical / Important，仅两项 Minor：并发创建临时目录可能误拒绝，
+以及清理错误的两个分支缺直接测试。已按反馈补三项真实文件系统 / 确定性时序测试：
+原实现运行 3 项（53 秒）为 2 GREEN / 1 行为 RED，失败明确为目录已经被另一操作
+创建后仍报“无法创建私有备份临时区”。源码只增加 mkdirs 失败后的 isDirectory 重查。
+清理-only 失败明确不返回成功；清理与校验同时失败保留原校验错误并附 suppressed，
+不递归删除故障装置的非空目录。测试自身的 owned TemporaryFolder 由 JUnit 清理。
+
+源码修正后采用以下 --rerun-tasks 强制完整五任务图，不把第一轮结果当作修正后通过：
+
+```powershell
+$env:JAVA_HOME='D:\jdk'
+$env:ANDROID_SERIAL='emulator-5556'
+.\.tools\gradle-9.4.1\bin\gradle.bat :app:testDebugUnitTest :app:assembleDebug `
+  :app:assembleDebugAndroidTest :app:lintDebug :app:connectedDebugAndroidTest `
+  --rerun-tasks --offline --console=plain
+```
+
+**BUILD SUCCESSFUL，2 分 49 秒，101 项任务实际执行。** JDK 25 / Gradle 9.4.1 /
+API 35 Medium_Phone 独立只读、隐藏会话，最终 XML / lint / APK 核对：
+
+- JVM：569 项 / 55 套件，0 failure / error / skipped；本批新增 39 项。
+- 设备：34 项 / 17 套件，0 failure / error / skipped；仪器执行 33.166 秒，本批新增 2 项。
+- debug APK：18,528,475 字节，约 17.67 MiB；androidTest APK：1,213,629 字节，约 1.16 MiB。
+- lint：0 error / 28 warning；Room 旧索引、AGP/KAPT 和 SDK 等构建提示未隐藏。
+  最终体积和警告数取本次强制构建，不承诺相对旧增量报告的数值变化是功能优化。
+- 三个审查后测试均 GREEN：并发目录创建、单独清理失败、主失败附清理失败。
+  独立限定复审未发现剩余 Critical / Important / Minor，批准条件已由最新完整验证满足。
+- DEX 已核对包含新文件实现；schema 保持 v5 / 12 表 / 十表 75 字段，原需求、
+  主 Manifest、Gradle / 依赖、数据库 schema 无改动；`git diff --check` 通过。
+
+本批沿用已确认设计，以 TDD 验证文件行为；systematic-debugging 定位装置失败，
+requesting / receiving-code-review 的独立审查推动目录竞态修复及清理分支测试，
+verification-before-completion 要求修正后强制完整重跑。仅本地提交源码、测试、README
+及验收文档；构建产物、合成文件、缓存、测试日志、密钥和个人数据不纳入 Git。
+这只批准 Task 5 的文件底层子批，不代表 Task 5 / Phase 5 完成，也不开放未验收 UI。
+
+审查者独立核对最后 569 / 34 的 XML、三个新增回归、lint 与 APK 后确认批准条件满足，
+未发现待处理项。owned AVD 已按进程命令行 / 端口核对后关闭，adb 无残留设备；
+没有 wipe-data、删除 AVD 或写入用户快照。仅清理可重跑生成的合成测试文档及 owned
+临时文件，不删除用户来源 / 输出文档或真实业务库。
