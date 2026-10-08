@@ -1,6 +1,14 @@
 # 生活管理 Android App
 
-当前实现范围：Phase 1（待办事项核心闭环）、Phase 2（日程安排）、Phase 3（习惯打卡）和 Phase 4（订阅费用管理）。四个业务模块共享同一个 Room 数据库，底部导航另保留已有设置页。下述为已实现能力，不代表需求文档中的所有功能或设备验收均已完成。
+Kotlin + Jetpack Compose 的离线生活管理工具，包含待办、日程、习惯打卡与订阅费用管理。
+
+更新日期：2026-10-09。
+
+[下载 Android 预览 APK](https://github.com/lieer-12/app/releases/download/v0.1.0-ui-preview-20261008/app-debug.apk) · [版本说明](https://github.com/lieer-12/app/releases/tag/v0.1.0-ui-preview-20261008) · [最新开发代码](https://github.com/lieer-12/app/tree/feat/phase5-settings-backup)
+
+> 当前预览版本为 `v0.1.0-ui-preview-20261008`，对应源码提交 `ee8ac35`。Phase 5 功能与第一批 UI 位于 `feat/phase5-settings-backup`，尚未合并到 `main`；本 README 描述的是开发分支与预览 APK 的能力，不代表默认分支已有这些代码。APK 是测试预览版，不是正式发布版。
+
+当前实现范围：Phase 1（待办事项核心闭环）、Phase 2（日程安排）、Phase 3（习惯打卡）、Phase 4（订阅费用管理），以及 Phase 5 的设置和完整备份维护。四个业务模块共享同一个 Room 数据库，底部导航另保留设置页。Phase 5 功能回归通过，稳定 60 fps / 真机等未验收项仍明确保留；不代表原文档全部高级功能和发布要求均已完成。
 
 已包含的目标能力：
 
@@ -10,7 +18,8 @@
 - 待办创建、编辑、删除、完成/取消、优先级、标签、搜索和基础日期筛选
 - 今日完成数、待完成数和完成率
 - 本地截止提醒、通知权限处理和确定性提醒 ID
-- 系统浅色/深色主题
+- Room 持久化的跟随系统/浅色/深色主题选择
+- 日期展示格式，以及只影响新建订阅的默认币种与提前 1/3/7 天提醒组合
 - 日程月/周/日视图、日程 CRUD、重复规则、冲突确认与本地提醒
 - 习惯 CRUD、每日打卡/撤销、按月打卡日历、频率感知的连续统计和最近 53 周热力图
 - 订阅 CRUD、取消/恢复、独立的手工实际扣费记录、周/月/季/年周期预测
@@ -18,7 +27,47 @@
 - 扣费前 1/3/7 天本地 09:00 提醒、取消/删除清理、重启及后台校准
 - 隐私确认后通过系统文件选择器导出 UTF-8 BOM CSV，包含全部币种
 
-暂未实现：Phase 5 备份/恢复等扩展、打卡提醒、习惯暂停和归档；没有这些功能的页面、假数据或空白占位 Tab。
+Phase 5 功能回归通过：完整 JSON 导出/预览/恢复，保护备份与独立最终确认，原子业务清空（保留设置），全应用维护会话/本机世代保护，三类提醒开关及恢复校准，权限状态刷新和关于/离线第三方许可。顶层导航限制重复条目、保留草稿/子页，维护及备份锁涵盖顶部入口、返回键与通知跳转。2026-10-08 已推送相关功能与第一批 UI，并发布预览 APK；这不意味着 Phase 5 性能已验收。各批历史结果见 [Phase 5 验收记录](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/phase5-acceptance.md)。
+
+仍未实现：打卡提醒、习惯暂停和归档，以及以前阶段报告明确保留的高级功能；没有这些功能的假按钮、假数据或空白占位 Tab。
+
+## UI 改版
+
+已批准卡通手账方向，第一批范围为 Material 3 预设浅/深色主题、系统字体层级、圆角底部导航和待办页面。保留原有五个入口、真实统计、搜索筛选和数据维护保护，不插入示例业务数据。清单插画使用小型原生 Canvas，不将 AI 预览整图当作界面；完成状态仅有轻量短时颜色反馈。
+
+第一批已完成并发布预览版，覆盖读屏进度、筛选恢复及 320dp / 200% 字体；浅深色实际模拟器截图已检查。打卡、日程、订阅、设置的整页视觉优化仍待后续批次；深色模式的系统三键导航区域仍呈浅灰色。本次 UI 的稳定 60 fps / 真机性能仍未验收。详情见 [UI 验收记录](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/ui-redesign-acceptance.md)。
+
+## 已有验证与待验收项
+
+以下为 2026-10-08 预览源码的验证证据；此次 README 更新没有重跑应用测试或更换 APK。
+
+- 第一批 UI 的全量验证：665 项 JVM / 67 套件、54 项 API 35 设备测试 / 23 套件，均无 failure / error / skipped；Debug/Release 构建通过，lint 0 error / 57 warning。
+- 随后的推送前复验：665 项 JVM 使用 `--rerun` 重新执行通过；构建与 lint 通过。该轮设备复验因模拟器实例冲突未执行，不把此前 54 项结果当作重新运行。
+- 历史 Phase 5 非调试模拟器冷启动 545–625 ms，切页卡顿率汇总 4.49%；这不是新版 UI 性能结论，也不证明稳定 60 fps。真机、完整适配和发布验收待完成，方法与限制见 [性能测量](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/phase5-performance.md)。
+
+## 手机安装预览版
+
+最低支持 Android 8.0（API 26），无需 Android Studio。
+
+1. 用手机浏览器点击 [下载 app-debug.apk（约 19.4 MB）](https://github.com/lieer-12/app/releases/download/v0.1.0-ui-preview-20261008/app-debug.apk)，也可在 [预览版页面](https://github.com/lieer-12/app/releases/tag/v0.1.0-ui-preview-20261008) 的 Assets 中下载。
+2. 下载后打开 APK，按系统提示允许当前浏览器/文件管理器安装来自此来源的应用，然后安装。
+3. 安装完成后打开应用；可关闭刚才授予的安装权限。不要下载 Source code ZIP 或未签名 Release APK，它们不能作为此预览安装包使用。
+
+此包为 Debug 签名测试版，不是应用商店正式版本，也不代表 Phase 5 性能或全部 UI 已验收。文件大小 19,350,922 字节；SHA-256：`30786204c2fc04d1853232f9eda9e4ae8cb35c6c7ff93bacbfee3323a8206045`。
+
+用手机浏览器打开 APK，按系统提示仅允许该浏览器/文件管理器安装来自此来源的应用，安装后可关闭此权限。无需关闭 Play Protect 等全局安全保护；不同厂商菜单名称可能不同，参见 [Android 安装说明](https://support.google.com/pixelphone/answer/7391672?hl=zh-Hans)。GitHub 访问不畅时，可在电脑下载 APK 后用 USB 文件传输到手机安装，无需开启 USB 调试。
+
+如果手机已有旧版，先在设置中导出完整备份，再尝试覆盖安装。出现签名冲突时不要直接卸载或清除数据；先保留备份并核对版本。调试签名与未来正式签名可能不同，不保证届时能直接覆盖升级。预览包不含个人业务数据；数据保存在安装设备的本地 Room 数据库。
+
+## 完整备份与数据维护
+
+- 设置 → 导出完整备份：先确认明文隐私说明，再选择系统文档保存位置。写入、关闭并重新读取校验一致后才报告成功。
+- 设置 → 从备份恢复：受限复制来源到私有临时区，验证版本、SHA-256、全部十表 75 字段及关联；展示真实数量，确认替换语义；必须另外保存并验证当前数据的保护备份，再进行独立最终确认。
+- 只支持 JSON v1 / Room schema v5 的完整替换，不合并，不导入本机世代；恢复包含设置，清空业务数据则保留设置。使用单个 Room 事务，不使用 destructive migration。
+- 取消或事务失败保留原数据和未保存草稿；提交成功后旧草稿/旧通知/旧文件回调不能作用于恢复后的同 ID 记录。进程重建不自动重放未完成操作。
+- Room 提交和 Android 闹钟不是同一事务；提醒处理失败时明确区分“数据已提交”，并请求从当前 Room 数据重新校准。权限拒绝不影响离线 CRUD。
+- 备份为明文；SHA-256 不是加密或身份认证。默认上限 64 MiB / 100,000 行；峰值内存可能高于文件大小。文件提供方失败可能留下输出残片，应用不会删除用户选择的文件。
+- 当前仅核对来源与保护备份的确切 URI；不同 URI 指向同一底层文件的提供方别名尚未做通用判定。建议使用新文件名保存保护备份。
 
 ## 构建环境
 
@@ -27,7 +76,14 @@
 - Gradle 9.4.1
 - JDK 25（Gradle 运行时）；Android 字节码目标仍为 Java/Kotlin 17，以保持设备兼容性
 
-在具备 Android SDK、JDK 25 和 Gradle 后运行：
+先准备 Android SDK、JDK 25 与 Gradle，再从最新开发分支获取源码，避免误用尚未包含预览功能的默认分支：
+
+```powershell
+git clone --branch feat/phase5-settings-backup https://github.com/lieer-12/app.git
+cd app
+```
+
+本项目尚未提供 Gradle Wrapper，以下命令依赖已安装的 Gradle 9.4.1；`.tools` 和 `local.properties` 是本机文件，不随 Git 克隆。
 
 ```powershell
 gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
@@ -40,9 +96,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/check-phase4-structure
 .\.tools\gradle-9.4.1\bin\gradle.bat --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
 ```
 
-请在 `local.properties` 配置本机 `sdk.dir`，并令 `JAVA_HOME` 指向 JDK 25。首次构建需要下载依赖；缓存齐全后可添加 `--offline`。旧 Phase 结构脚本是对应历史阶段的边界检查，当前代码使用 Phase 4 脚本。连接设备后可运行 `gradle :app:connectedDebugAndroidTest`；编译测试 APK 不等于设备测试已通过。
+请在 `local.properties` 配置本机 `sdk.dir`，并令 `JAVA_HOME` 指向 JDK 25。首次构建需要下载依赖；缓存齐全后可添加 `--offline`。旧 Phase 结构脚本是对应历史阶段的边界检查，当前代码使用 Phase 4 脚本。只连接独立测试模拟器后可运行 `gradle :app:connectedDebugAndroidTest`；该任务会卸载测试应用，不得在有个人业务数据的手机或用户原会话上运行。编译测试 APK 不等于设备测试已通过。
 
-习惯回归测试新增 Robolectric 4.17：在主机上执行真实 Room DAO/仓库和 Compose 交互，不替代真机测试。首次运行还需下载 Robolectric Android 28 测试运行时；它默认缓存于用户目录的 `.m2/repository`，与 Gradle 依赖缓存分开。只有两类缓存均齐全时才能完整离线测试，Gradle 的 `--offline` 本身不会阻止 Robolectric 首次下载运行时。Robolectric 与新增 Compose 测试依赖仅用于测试，不加入正式 APK。
+Robolectric 4.17 在主机上执行真实 Room DAO/仓库和 Compose 交互，不替代真机测试。首次运行还需下载 Android 28、31、33 测试运行时；默认缓存于用户目录的 `.m2/repository`，与 Gradle 依赖缓存分开。只有两类缓存均齐全时才能完整离线测试，Gradle 的 `--offline` 本身不会阻止 Robolectric 首次下载运行时。Robolectric 与 Compose 测试依赖仅用于测试，不加入正式 APK。
 
 ## 权限与提醒行为
 
@@ -62,24 +118,57 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/check-phase4-structure
 
 ## 阶段状态
 
-- Phase 1：待办核心闭环已实现；待设备验收通知行为。
-- Phase 2：日程模块已实现、结构检查和 debug APK 构建已通过；等待仪器测试与设备提醒验收。
-- Phase 3：打卡模块已实现、结构检查、规则/状态单元测试与 debug APK 构建已通过；等待 Room 仪器测试和设备 UI 验收。
-- Phase 4：订阅模块已实现；验证结果、已完成与待验收事项见 [Phase 4 验收记录](docs/phase4-acceptance.md)。
-- Phase 5：未开始。
+- Phase 1：待办核心闭环已实现，已纳入后续可靠性与通知自动回归；真实设备提醒验收和高级功能仍有边界。
+- Phase 2：日程核心模块已实现，后续补充数据完整性与通知回归；完整重复规则、时间轴交互等限制见下文。
+- Phase 3：打卡核心模块已实现，后续修复历史记录保护与打卡资格，并纳入 Room/界面回归；打卡提醒、暂停与归档尚未实现。
+- Phase 4：订阅模块已实现；验证结果、已完成与待验收事项见 [Phase 4 验收记录](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/phase4-acceptance.md)。
+- Phase 5：约定功能开发及纳入范围的 API 35 回归通过；已随预览版推送，稳定 60 fps / 真机与正式发布验收尚未完成，见 [Phase 5 验收记录](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/phase5-acceptance.md)。
+- UI 改版：第一批主题、导航与待办完成；其余模块整页改版尚未完成，不增加假数据或未实现入口。
 
-2026-10-02 第一批审计修复仅处理习惯数据完整性和打卡资格，见 [修复与回归验收记录](docs/2026-10-02-habit-integrity-fixes.md)。编辑习惯保留历史打卡；开始日期之前或未选星期不允许新增打卡，但已有错误记录仍可撤销。数据库版本保持 v4，无 schema 变更或破坏性迁移；旧版本已经误删的记录无法由本修复恢复。
+## Phase 5 设置行为
 
-第二批处理待办可靠性，最新结果见 [待办修复验收记录](docs/2026-10-02-todo-reliability-fixes.md)。沿用第一批的 Robolectric 测试环境，本批未新增依赖、业务表或占位页面。
+- 数据库 v5 显式新增设置和本机维护元数据表；保留 v1 到 v5 的迁移链，不重建或改写既有十张业务表。
+- 设置读取失败时不可编辑；保存失败保留已保存值。“重新读取设置”只刷新保存状态，失败的选择需要再次选择，不声称自动重试保存。
+- 日期格式只影响四模块的完整日期展示；月标题、时间与日历中的日号保持原语义。订阅表单日期输入及 CSV 文件仍为 ISO `YYYY-MM-DD`，存储与计费/打卡计算不变。
+- 默认币种 CNY、默认订阅提醒为空集，保持旧新建行为。只用于之后新建的订阅；已有订阅和手工扣费的币种、金额、提醒不会被覆盖，统计仍仅汇总 CNY。
+- 新建订阅读取偏好期间禁用保存、币种和提醒编辑；读取失败保留输入并要求关闭后重试，不静默使用默认值保存。
+- 三类提醒开关已接入保存、后台校准和投递路径；关闭时取消模块闹钟及通知，开启时从当前 Room 重建。开关不等于系统授权，返回前台或权限申请结束时重新读取真实权限状态。习惯提醒未实现，不展示占位开关。
+- Android 仪器测试的 Room schema 读取依赖 serialization 1.8.1；BOM 同时对齐主 APK 的 Navigation 间接依赖，避免测试 APK JSON 与主 APK core 混用版本。没有启用新的序列化编译插件。
 
-第三批处理日程数据完整性、编辑/冲突确认和通知草稿交接，见 [日程修复验收记录](docs/2026-10-02-schedule-integrity-fixes.md)。数据库仍为 v4，无 schema 变更；不代表日程全部需求或设备验收完成，旧版本已经误删的例外记录无法自动恢复。
+## Phase 5 备份格式与文件安全
+
+- 已实现 Room 单事务完整快照，以及 format v1 / schema v5 的 UTF-8 JSON 编解码与严格校验；包含十张业务表全部 75 字段和用户设置，保留 Long 精度、原始文本、关联及历史记录。
+- 校验覆盖重复 JSON 字段、缺失/未知表或字段、版本、类型、日期/时区、SHA-256、唯一键、孤儿关联及待办父子环；超出 64 MiB 或合计 100,000 业务行时明确拒绝，不截断、不修复原库。
+- 文件格式和校验规则见 [备份格式 v1](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/backup-format-v1.md)。SHA-256 不是加密或来源认证，文件是明文个人数据。
+- Android 文件流导出关闭后重新读取、完整校验并比对本次文档；输入按实际字节限流，先复制到私有临时区再校验，在成功、失败和取消时只清理自己创建的临时文件。文件 IO 不持有普通数据库维护许可。
+- 设置页已接线系统文件选择、真实预览、保护备份、独立最终确认与原子恢复/清空。应用启动只清理本应用已失去所有者的数字命名临时文件；同一进程重复初始化不删活跃输入，进程重建不重放待确认操作。测试层级及实际未验收边界见 [文件安全契约](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/backup-file-safety.md)。
+
+## Phase 5 维护保护
+
+- 已实现全局维护协调器：冻结后拒绝新操作，等待已有许可结束；维护会话不持有 Mutex 等待用户选择文件或确认。取消/失败可安全释放，外来、已失效会话和重复获取许可会被拒绝。
+- 世代仓库提供严格读取及 Room 原子事务：业务变更与世代推进一起提交，写入失败或提交前取消一起回滚；旧令牌不能修改已更换的同 ID 数据。缺失/损坏元数据及 Long 上限明确报错，不静默归零。
+- 数据库由应用 Hilt 单例通过创建工厂及 v5 初始化回调打开；后台 Worker 取得同一组仓库和维护协调器，不再自行开库或关闭应用数据库。只在新建/显式升级时初始化，普通设置读取/更新不补写维护世代。
+- 已接入四个业务模块与设置 ViewModel：页面快照/草稿携带读取时的世代，真实写入及 Main 结果发布使用全局许可；维护中拒绝新写入，取消保留草稿，成功推进世代使旧草稿及旧页面回调失效。设置本地币种草稿随世代变化重置。
+- 读取世代失败时停止写入，不使用默认 0；习惯保存防重复提交，不复活已被删除的记录。设置失败读取/重试、事务内提醒天数组合和延迟观察语义继续保留。
+- 设置观察、有限读取及更新均不补建缺失默认行；默认值只由数据库新建/迁移产生，缺失设置明确报错。仅拒绝的读取可等待维护结束后重新查询，写入仍不排队重放；旧错误回退不能禁用更换后的新页面。
+- 待办、日程通知在派发时绑定原世代；订阅详情、手工扣费和 CSV 选择回调同时核对原世代/请求。CSV 选择关联跨重组/旋转保存；已经准入并开始写入的旧 CSV 文件可在维护后完成，但不会发布旧成功状态或修改新库。
+- 第六批已完成 Activity 导航事件原世代、三类 Receiver 的到达/派发准入、Worker 冻结重试及启动/系统事件校准的局部验收。导航等待图初始化时不占用许可，实际切换在原世代许可内执行，并把原世代交给业务模块；迟到的中间世代观察不会误取消更新世代通知。即时校准串行保留后续请求，每轮重新读取当前库；队列代价及依赖限制见维护契约。
+- 三类闹钟、广播和通知点击源头携带原世代；未知/旧世代拒绝投递，不按到达时间重标新世代。日程投递重新读取真实记录、提醒开关、发生时间、例外及结束资格。维护成功、取消、失败退出均请求当前数据校准；非取消正常退出还立即校准，提交数据与提醒处理结果分别报告。
+- 被维护挡住的一次性订阅/日程提醒保留匹配的操作提示，释放后重新核对当前 Room 资格再排程；临时闹钟服务或读取失败不提前抹掉待恢复发生记录。这些 SharedPreferences 只存 OS 操作索引，不保存业务内容或用户设置，不属于备份数据。
+- 协调器接线契约见 [维护接线说明](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/maintenance-coordination.md)；当前分批验收见 [Phase 5 验收记录](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/phase5-acceptance.md)。
+
+2026-10-02 第一批审计修复仅处理习惯数据完整性和打卡资格，见 [修复与回归验收记录](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/2026-10-02-habit-integrity-fixes.md)。编辑习惯保留历史打卡；开始日期之前或未选星期不允许新增打卡，但已有错误记录仍可撤销。当时数据库保持 v4；当前开发分支已通过 Phase 5 显式迁移至 v5，未使用破坏性迁移。旧版本已经误删的记录无法由本修复恢复。
+
+第二批处理待办可靠性，历史结果见 [待办修复验收记录](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/2026-10-02-todo-reliability-fixes.md)。沿用第一批的 Robolectric 测试环境，本批未新增依赖、业务表或占位页面。
+
+第三批处理日程数据完整性、编辑/冲突确认和通知草稿交接，见 [日程修复验收记录](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/2026-10-02-schedule-integrity-fixes.md)。该历史修复阶段数据库为 v4，无 schema 变更；不代表日程全部需求或设备验收完成，旧版本已经误删的例外记录无法自动恢复。
 
 ## 当前已知限制
 
 - 尚未加入子任务、批量操作和手动拖拽排序，这些属于待办模块的后续完善项。
 - 日程不含拖拽改期、双指缩放和“仅取消某次重复日程”的编辑入口。
-- 仪器测试、设备提醒行为和打卡 UI 交互仍需在真机或模拟器验证。
+- 验证证据同时参考 [Phase 5 历史验收](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/phase5-acceptance.md) 与 [UI 预览验收](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/ui-redesign-acceptance.md)，区分测试日期和范围。合成 Room、Downloads 文档、真实系统选择器取消测试分别说明，不把局部装置通过当作真实用户数据或云文件提供方验收。
 - 订阅的通知点击、权限切换、CSV 文件提供方行为和深浅色交互仍需设备验收；没有接入银行卡/支付自动扣费或汇率服务。
-- CSV 为消费数据明文文件，请选择可信保存位置，谨慎分享；不提供 CSV 导入或备份恢复。进程被系统终止时，进行中的导出不保证恢复。
-- 待办第二批修复不改变统计口径；日程第三批不处理全天提醒时间策略、重复提醒续排/投递前数据库校验、重复发生冲突检测窗口、自定义重复参数 UI 和例外记录展示。周/日视图尚非按小时的时间轴。完整待修清单及测试限制见各批报告，不能将局部通过等同于全部需求验收。
-- 习惯整体今日进度、周/月打卡率和庆祝动画，订阅年度/同比及逐订阅占比，以及设置、国际化、隐私保护和发布配置等仍不完整；Gradle Wrapper、发布签名、SDK 发布要求与性能/适配验收待完善。
+- CSV 为消费数据明文文件，请选择可信保存位置，谨慎分享；不提供 CSV 导入，完整备份/恢复使用 JSON，不是 CSV。进程被系统终止时，进行中的导出不保证恢复。
+- 待办修复不改变统计口径；日程的投递前数据库校验已在 Phase 5 接入，但全天提醒策略、完整重复提醒续排、重复发生冲突窗口、自定义重复参数 UI 和例外编辑展示仍有历史限制。周/日视图尚非按小时的时间轴；不能将局部通过等同于全部需求验收。
+- 习惯整体今日进度、周/月打卡率和庆祝动画，订阅年度/同比及逐订阅占比，国际化、后台隐私遮罩和发布配置仍不完整；Gradle Wrapper、发布签名、SDK 发布要求、真机性能/适配及完整传递依赖许可证审计待完善。UI 卡通改版第一批已完成，其余页面与性能验收仍待后续工作。
