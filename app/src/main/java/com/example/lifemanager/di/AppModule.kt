@@ -77,11 +77,30 @@ abstract class AppModule {
     @Singleton
     abstract fun bindBackupFileStore(impl: AndroidBackupFileStore): BackupFileStore
 
+    @Binds
+    @Singleton
+    abstract fun bindBackupMutations(impl: com.example.lifemanager.data.backup.BackupMutationRepositoryImpl): com.example.lifemanager.domain.backup.BackupMutationRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindMaintenanceEffects(impl: com.example.lifemanager.notification.AndroidMaintenanceReminderEffects): com.example.lifemanager.domain.maintenance.MaintenanceReminderEffects
+
 }
 
 @Module
 @InstallIn(SingletonComponent::class)
 object ProviderModule {
+    @Provides
+    fun provideBackupWorkflow(
+        snapshots: BackupRepository,
+        mutations: com.example.lifemanager.domain.backup.BackupMutationRepository,
+        files: BackupFileUseCases,
+        generations: DataGenerationRepository,
+        coordinator: MaintenanceCoordinator,
+        reminders: com.example.lifemanager.domain.maintenance.MaintenanceReminderEffects,
+        @IoDispatcher dispatcher: CoroutineDispatcher,
+    ) = com.example.lifemanager.domain.backup.BackupMaintenanceWorkflow(snapshots, mutations, files, generations, coordinator, reminders, dispatcher)
+
     @Provides
     @Singleton
     fun provideBackupCodec(): BackupCodec = BackupJsonCodec()

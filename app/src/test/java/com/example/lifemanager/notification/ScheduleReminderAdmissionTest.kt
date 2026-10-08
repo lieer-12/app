@@ -26,7 +26,7 @@ class ScheduleReminderAdmissionTest {
     private val context get() = RuntimeEnvironment.getApplication()
     private val notifications get() = shadowOf(context.getSystemService(NotificationManager::class.java))
 
-    // The real old receiver posts directly; global admission must reject even its valid legacy payload.
+    // Current payloads still require admission before Room qualification.
     @Test fun readyMaintenanceRejectsSchedulePosting(): Unit = runTest {
         val admission = ReminderAdmissionFixture()
         admission.coordinator.withSession {
@@ -74,8 +74,10 @@ class ScheduleReminderAdmissionTest {
         assertEquals(0, admission.calibrationRequests)
     }
 
-    // Full alarm generation and Room qualification belong to Task 6; this batch preserves that payload.
-    private fun validIntent() = Intent()
+    // Matches the explicit current schedule fixture, but its title remains untrusted.
+    private fun validIntent() = Intent().setData(android.net.Uri.parse("lifemanager://schedule-reminder/41"))
+        .putExtra(ReminderGeneration.EXTRA, 37L)
+        .putExtra(ScheduleReminderReceiver.EXTRA_OCCURRENCE_START, ReminderTestSchedules.start.toEpochMilli())
         .putExtra(ScheduleReminderReceiver.EXTRA_SCHEDULE_ID, 41L)
         .putExtra(ScheduleReminderReceiver.EXTRA_TITLE, "schedule fixture")
 }

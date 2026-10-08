@@ -5,6 +5,7 @@ import android.util.Log
 import com.example.lifemanager.di.IoDispatcher
 import com.example.lifemanager.domain.maintenance.MaintenanceBusyException
 import com.example.lifemanager.domain.maintenance.MaintenanceCoordinator
+import com.example.lifemanager.domain.maintenance.DataGeneration
 import com.example.lifemanager.domain.maintenance.StaleGenerationException
 import dagger.hilt.android.EntryPointAccessors
 import javax.inject.Inject
@@ -27,15 +28,21 @@ class ReminderBroadcastRunner @Inject constructor(
     fun launch(
         finish: () -> Unit,
         onBusy: () -> Unit,
+        sourceGeneration: DataGeneration? = null,
         operation: suspend () -> Unit,
     ): Job = CoroutineScope(dispatcher).launch(start = CoroutineStart.UNDISPATCHED) {
         try {
             withTimeout(8_000) {
-                // Count capture at arrival; its metadata read also belongs to the deadline.
-                val originalToken = coordinator.capture()
-                // Even an immediate capture must dispatch validation onto IO, retaining its token.
+                if (coordinator.state.value != com.example.lifemanager.domain.maintenance.MaintenanceState.IDLE) {
+                    throw MaintenanceBusyException()
+                }
+                if (sourceGeneration == null) {
+                    onBusy()
+                    return@withTimeout
+                }
+                // Dispatch Room validation onto IO, retaining the original scheduling token.
                 yield()
-                coordinator.run(originalToken) { operation() }
+                coordinator.run(sourceGeneration) { operation() }
             }
         } catch (_: MaintenanceBusyException) {
             // Only fresh reconciliation is requested; no old payload is retained or replayed.
@@ -79,6 +86,7 @@ internal fun startReminderBroadcast(
     runnerProvider: (Context) -> ReminderBroadcastRunner,
     finish: () -> Unit,
     onBusy: (Context) -> Unit,
+    sourceGeneration: DataGeneration? = null,
     operation: suspend () -> Unit,
 ) {
     val runner = try {
@@ -91,5 +99,5 @@ internal fun startReminderBroadcast(
         finish()
         return
     }
-    runner.launch(finish, { onBusy(context.applicationContext) }, operation)
+    runner.launch(finish, { onBusy(context.applicationContext) }, sourceGeneration, operation)
 }

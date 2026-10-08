@@ -65,6 +65,7 @@ class ReminderCalibrationQueueTest {
     private val snapshots = mutableListOf<List<String>>()
     private val workerIds = mutableListOf<String>()
     private val workName = "reminder_reconciliation_immediate"
+    private val settings = ReminderTestSettings()
 
     @Before fun setup() {
         context = LifeManagerApp()
@@ -74,7 +75,9 @@ class ReminderCalibrationQueueTest {
         ReflectionHelpers.setField(context, "mBase", base)
         database = Room.inMemoryDatabaseBuilder(context, LifeManagerDatabase::class.java)
             .allowMainThreadQueries().build()
-        val coordinator = MaintenanceCoordinator(TestGenerations(7))
+        val generations = TestGenerations(7)
+        val coordinator = MaintenanceCoordinator(generations)
+        val state = ReminderSchedulingState(generations, settings)
         val realTodos = TodoRepositoryImpl(database)
         val observedTodos = object : TodoRepository by realTodos {
             override suspend fun getAllTodos(): List<Todo> {
@@ -89,9 +92,9 @@ class ReminderCalibrationQueueTest {
             }
         }
         val reconciler = ReminderReconciler(
-            observedTodos, ReminderScheduler(context),
-            ScheduleRepositoryImpl(database), ScheduleReminderScheduler(context),
-            SubscriptionRepositoryImpl(database), SubscriptionReminderScheduler(context), coordinator,
+            observedTodos, ReminderScheduler(context) { state },
+            ScheduleRepositoryImpl(database), ScheduleReminderScheduler(context, { state }, { ScheduleRepositoryImpl(database) }),
+            SubscriptionRepositoryImpl(database), SubscriptionReminderScheduler(context) { state }, coordinator, settings, ReminderNotifications(context),
         )
         val factory = object : WorkerFactory() {
             override fun createWorker(appContext: Context, workerClassName: String, workerParameters: WorkerParameters): ListenableWorker? {
@@ -178,6 +181,27 @@ class ReminderCalibrationQueueTest {
 
     @Test fun cancelledCalibrationDoesNotPoisonTheNextSystemEventQueue() {
         assertTerminalChainCanRestart(WorkInfo.State.CANCELLED)
+    }
+
+    @Test fun bootAndTimeChangeWorkersKeepDisabledRemindersOff(): Unit = runTest(dispatcher) {
+        TodoRepositoryImpl(database).saveTodo(Todo(title = "switch fixture", dueAt = Instant.now().plusSeconds(3600)), emptyList())
+        releaseFirstPass.complete(Unit)
+        ReminderReconciliationWorker.enqueueImmediate(context)
+        val first = work().single()
+        start(first.id.toString())
+        pumpUntil("initial worker must finish") { state(first.id.toString()) == WorkInfo.State.SUCCEEDED }
+        fun businessAlarmCount() = shadowOf(context.getSystemService(AlarmManager::class.java)).scheduledAlarms.count {
+            shadowOf(it.operation).savedIntent.dataString?.startsWith("lifemanager://todo-reminder/") == true
+        }
+        assertEquals(1, businessAlarmCount())
+        settings.updateSettings { it.copy(todoReminders = false) }
+        for (action in listOf(Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_TIME_CHANGED)) {
+            BootReceiver().onReceive(context, Intent(action))
+            val next = work().single { it.state == WorkInfo.State.ENQUEUED }
+            start(next.id.toString())
+            pumpUntil("system-event worker must finish") { state(next.id.toString()) == WorkInfo.State.SUCCEEDED }
+            assertEquals(0, businessAlarmCount())
+        }
     }
 
     private fun assertTerminalChainCanRestart(terminalState: WorkInfo.State) {

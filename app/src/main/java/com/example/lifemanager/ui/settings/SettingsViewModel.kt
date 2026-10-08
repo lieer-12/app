@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 @HiltViewModel
@@ -35,6 +36,7 @@ class SettingsViewModel @Inject constructor(
     @param:IoDispatcher private val dispatcher: CoroutineDispatcher,
     private val generationAccess: GenerationAccess,
 ) : ViewModel() {
+    @Inject lateinit var reminderEffects: com.example.lifemanager.domain.maintenance.MaintenanceReminderEffects
     private val state = MutableStateFlow(SettingsUiState())
     val uiState = state.asStateFlow()
     private val reload = MutableStateFlow(0L)
@@ -124,6 +126,14 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setTheme(theme: ThemeMode, generation: DataGeneration? = state.value.generation) = saveSetting(generation) { it.copy(theme = theme) }
+    fun setReminderEnabled(module: String, enabled: Boolean, generation: DataGeneration? = state.value.generation) = saveSetting(generation, recalibrate = true) {
+        when (module) {
+            "todo" -> it.copy(todoReminders = enabled)
+            "schedule" -> it.copy(scheduleReminders = enabled)
+            "subscription" -> it.copy(subscriptionReminders = enabled)
+            else -> error("Unsupported reminder module")
+        }
+    }
     fun setDateFormat(format: DateFormat, generation: DataGeneration? = state.value.generation) = saveSetting(generation) { it.copy(dateFormat = format) }
     fun setDefaultCurrency(currency: String, generation: DataGeneration? = state.value.generation) = saveSetting(generation) { it.copy(defaultCurrency = currency.trim().uppercase(Locale.ROOT)) }
     fun setDefaultReminderDay(day: Int, selected: Boolean, generation: DataGeneration? = state.value.generation) = saveSetting(generation) {
@@ -137,7 +147,7 @@ class SettingsViewModel @Inject constructor(
         null
     }
 
-    private fun saveSetting(generation: DataGeneration?, transform: (AppSettings) -> AppSettings) {
+    private fun saveSetting(generation: DataGeneration?, recalibrate: Boolean = false, transform: (AppSettings) -> AppSettings) {
         val token = eventToken(generation) ?: return
         val previous = state.getAndUpdate {
             if (!it.isAvailable || it.settings == null || it.isLoading || it.isSaving || it.generation != token) it
@@ -170,6 +180,13 @@ class SettingsViewModel @Inject constructor(
                     }
                     withContext(Dispatchers.Main.immediate) { finishSave(save) }
                 }
+                if (recalibrate) {
+                    try { kotlinx.coroutines.withTimeout(8_000) { reminderEffects.reconcile() } }
+                    catch (error: Exception) {
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                        publishResult(token) { state.update { it.copy(errorMessage = "提醒偏好已保存，但提醒校准失败；已请求后台重试，请检查系统权限") } }
+                    }
+                }
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
                 if (error !is MaintenanceBusyException && error !is StaleGenerationException) {
@@ -181,6 +198,14 @@ class SettingsViewModel @Inject constructor(
                     }
                 }
             } finally {
+                if (recalibrate) withContext(NonCancellable) {
+                    try { reminderEffects.requestReconciliation() }
+                    catch (_: Exception) {
+                        withContext(Dispatchers.Main.immediate) {
+                            if (state.value.generation == token) state.update { it.copy(errorMessage = "请重新打开应用检查提醒状态，后台重试未能安排") }
+                        }
+                    }
+                }
                 // Cleanup must also run when cancellation prevents admitted result publication.
                 withContext(NonCancellable + Dispatchers.Main.immediate) { finishSave(save) }
             }

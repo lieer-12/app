@@ -30,6 +30,7 @@ class SubscriptionReminderReceiver(
         ReminderBroadcastRunner.fromApplication(it, dispatcher)
     },
     private val onBusy: (Context) -> Unit = { ReminderReconciliationWorker.enqueueImmediate(it) },
+    private val settingsProvider: (Context) -> com.example.lifemanager.domain.repository.SettingsRepository = ::reminderSettings,
 ) : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val subscriptionId = intent.getLongExtra(EXTRA_SUBSCRIPTION_ID, 0L)
@@ -44,18 +45,39 @@ class SubscriptionReminderReceiver(
         ) return
 
         val pendingResult = goAsync()
-        startReminderBroadcast(context, runnerProvider, { pendingResult?.finish() }, onBusy) {
-            SubscriptionOperationCoordinator.run {
-                val repository = repositoryProvider(context)
-                val subscription = repository.getSubscription(subscriptionId)
-                val selectedDays = repository.getReminderDays(subscriptionId)
-                // Global admission encloses the module lock, reads, alarm changes and posting.
-                SubscriptionReminderDelivery.reconcile(
-                    subscriptionId, subscription, selectedDays, daysBefore, dueDate,
-                    Instant.now(), ZoneId.systemDefault(), schedulerProvider(context),
-                ) { current ->
-                    SubscriptionNotificationHelper.showReminder(context, current, daysBefore, dueDate)
+        val generation = ReminderGeneration.read(intent)
+        // A PendingIntent can survive consumption of its one-shot alarm. This is only a matching
+        // operational receipt, not permission to post or mutate Room while maintenance is frozen.
+        if (generation != null) {
+            try { SubscriptionReminderScheduler.recordArrival(context, subscriptionId, daysBefore, dueDate, generation) }
+            catch (_: Exception) { /* Admission still decides whether delivery is allowed. */ }
+        }
+        startReminderBroadcast(context, runnerProvider, { pendingResult?.finish() }, onBusy, generation) {
+            try {
+                SubscriptionOperationCoordinator.run {
+                    if (SubscriptionReminderScheduler.wasDelivered(context, subscriptionId, daysBefore, dueDate,
+                            requireNotNull(generation))) return@run
+                    if (!settingsProvider(context).getSettings().subscriptionReminders) {
+                        schedulerProvider(context).cancelAll(subscriptionId)
+                        return@run
+                    }
+                    val repository = repositoryProvider(context)
+                    val subscription = repository.getSubscription(subscriptionId)
+                    val selectedDays = repository.getReminderDays(subscriptionId)
+                    // Global admission encloses the module lock, reads, alarm changes and posting.
+                    SubscriptionReminderDelivery.reconcile(
+                        subscriptionId, subscription, selectedDays, daysBefore, dueDate,
+                        Instant.now(), ZoneId.systemDefault(), schedulerProvider(context),
+                    ) { current ->
+                        if (settingsProvider(context).getSettings().subscriptionReminders) {
+                            SubscriptionNotificationHelper.showReminder(context, current, daysBefore, dueDate, requireNotNull(generation))
+                            SubscriptionReminderScheduler.recordDelivery(context, subscriptionId, daysBefore, dueDate, generation)
+                        }
+                    }
                 }
+            } catch (error: Exception) {
+                try { onBusy(context.applicationContext) } catch (queueError: Exception) { error.addSuppressed(queueError) }
+                throw error
             }
         }
     }

@@ -29,6 +29,7 @@ class MainActivity : ComponentActivity() {
     private val todoViewModel: TodoViewModel by viewModels()
     private val scheduleViewModel: ScheduleViewModel by viewModels()
     private val settingsViewModel: SettingsViewModel by viewModels()
+    private val backupViewModel: com.example.lifemanager.ui.settings.BackupSettingsViewModel by viewModels()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) receiveNotificationIntent(intent)
@@ -39,7 +40,7 @@ class MainActivity : ComponentActivity() {
             val settings by settingsViewModel.uiState.collectAsStateWithLifecycle()
             LifeManagerTheme(themeMode = settings.settings?.theme) {
                 CompositionLocalProvider(LocalDateFormat provides (settings.settings?.dateFormat ?: DateFormat.YMD)) {
-                    NavGraph(todoViewModel = todoViewModel, settingsViewModel = settingsViewModel,
+                    NavGraph(todoViewModel = todoViewModel, settingsViewModel = settingsViewModel, backupViewModel = backupViewModel,
                         todoNavigation = todoNavigation, scheduleNavigation = scheduleNavigation,
                         subscriptionNavigation = subscriptionNavigation,
                         todoRequest = todoRequest, onTodoConsumed = todoNavigation::consume,
@@ -57,13 +58,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun receiveNotificationIntent(intent: Intent) {
-        todoNavigation.open(intent.getLongExtra(EXTRA_TODO_ID, 0L))
-        scheduleNavigation.open(intent.getLongExtra(EXTRA_SCHEDULE_ID, 0L))
-        subscriptionNavigation.open(intent.getLongExtra(EXTRA_SUBSCRIPTION_ID, 0L))
+        val sourceGeneration = com.example.lifemanager.notification.ReminderGeneration.read(intent)
+        todoNavigation.openFromNotification(intent.getLongExtra(EXTRA_TODO_ID, 0L), sourceGeneration)
+        scheduleNavigation.openFromNotification(intent.getLongExtra(EXTRA_SCHEDULE_ID, 0L), sourceGeneration)
+        subscriptionNavigation.openFromNotification(intent.getLongExtra(EXTRA_SUBSCRIPTION_ID, 0L), sourceGeneration)
         // The event is retained by the Activity ViewModel, never replayed from a stale Intent.
         intent.removeExtra(EXTRA_SUBSCRIPTION_ID)
         intent.removeExtra(EXTRA_TODO_ID)
         intent.removeExtra(EXTRA_SCHEDULE_ID)
+        intent.removeExtra(com.example.lifemanager.notification.ReminderGeneration.EXTRA)
     }
 
     companion object {

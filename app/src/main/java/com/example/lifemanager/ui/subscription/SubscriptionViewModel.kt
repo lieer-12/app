@@ -383,7 +383,7 @@ class SubscriptionViewModel @Inject constructor(
     private suspend fun reconcile(subscription: Subscription, days: Set<Int>) {
         try {
             scheduler.cancelAll(subscription.id)
-            if (subscription.isActive) scheduler.schedule(subscription, days)
+            if (subscription.isActive) scheduler.scheduleCurrent(subscription, days)
         } catch (error: Exception) {
             if (error is CancellationException) throw error
             withContext(Dispatchers.Main.immediate) { setError("数据已保存，但提醒安排失败，请检查系统提醒权限") }

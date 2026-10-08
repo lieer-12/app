@@ -224,7 +224,7 @@ class TodoReminderAdmissionTest {
         assertEquals(MaintenanceState.IDLE, admission.coordinator.state.value)
     }
 
-    @Test fun idleLegacyPayloadStillDeliversFromRealRoomAtANonzeroGeneration(): Unit = runTest {
+    @Test fun idleSourcePayloadStillDeliversFromRealRoomAtANonzeroGeneration(): Unit = runTest {
         val todo = saveDueTodo()
         val reads = ObservedReads(repository)
         receive(todo, reads)
@@ -244,6 +244,7 @@ class TodoReminderAdmissionTest {
         admission.todoReceiver(reads.repository, StandardTestDispatcher(testScheduler)).onReceive(
             context,
             Intent().setData(Uri.parse("lifemanager://todo-reminder/${todo.id}"))
+                .putExtra(ReminderGeneration.EXTRA, 37L)
                 .putExtra(TodoReminderReceiver.EXTRA_TODO_ID, todo.id)
                 .putExtra(TodoReminderReceiver.EXTRA_DUE_AT, todo.dueAt!!.toEpochMilli())
                 .putExtra(TodoReminderReceiver.EXTRA_TITLE, "untrusted fixture"),
@@ -288,6 +289,8 @@ class TodoReminderAdmissionTest {
 internal class ReminderAdmissionFixture {
     val generations = ReminderAdmissionGenerations()
     val coordinator = MaintenanceCoordinator(generations)
+    val settings = ReminderTestSettings()
+    val scheduling = ReminderSchedulingState(generations, settings)
     var repositoryResolutions = 0
         private set
     var calibrationRequests = 0
@@ -298,11 +301,13 @@ internal class ReminderAdmissionFixture {
         TodoReminderReceiver(
             { repositoryResolutions++; repository }, dispatcher,
             { ReminderBroadcastRunner(coordinator, dispatcher) }, { calibrationRequests++ },
+            settingsProvider = { settings },
         )
 
     fun scheduleReceiver(dispatcher: CoroutineDispatcher): ScheduleReminderReceiver =
         ScheduleReminderReceiver(
             dispatcher, { ReminderBroadcastRunner(coordinator, dispatcher) }, { calibrationRequests++ },
+            repositoryProvider = { ReminderTestSchedules() }, settingsProvider = { settings },
         )
 }
 

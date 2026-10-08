@@ -7,6 +7,17 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.SideEffect
+import kotlin.test.assertTrue
 import androidx.compose.runtime.CompositionLocalProvider
 import com.example.lifemanager.ui.settings.LocalDateFormat
 import com.example.lifemanager.domain.model.DateFormat
@@ -134,6 +145,40 @@ class HabitScreenRegressionTest {
         compose.waitUntil(5000) { compose.waitForIdle(); viewModel.uiState.value.cards.size == 1 }
         compose.waitForIdle()
         return repository
+    }
+
+    // The calendar must pair its primary highlight with onPrimary, not inherited body text.
+    @Test fun completedCalendarDayRetainsReadableContrastInLightTheme() = checkCompletedDayContrast(false)
+    @Test fun completedCalendarDayRetainsReadableContrastInDarkTheme() = checkCompletedDayContrast(true)
+
+    private fun checkCompletedDayContrast(dark: Boolean) {
+        val today = LocalDate.now()
+        val repository = ScreenRepository(Habit(id = 1, name = "阅读", startDate = today),
+            listOf(HabitRecord(habitId = 1, date = today, createdAt = Instant.EPOCH)))
+        val viewModel = HabitViewModel(repository, Dispatchers.IO, access)
+        model = viewModel
+        var background = Color.Unspecified
+        compose.setContent { LifeManagerTheme(darkTheme = dark) {
+            val primary = MaterialTheme.colorScheme.primary
+            SideEffect { background = primary }
+            HabitScreen(viewModel)
+        } }
+        compose.waitUntil(5000) { compose.waitForIdle(); viewModel.uiState.value.cards.size == 1 }
+        compose.onNodeWithText("统计").performClick()
+        compose.waitUntil(5000) { compose.waitForIdle(); viewModel.uiState.value.statistics != null }
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNode(hasText(today.dayOfMonth.toString()) and
+            hasAnyAncestor(hasContentDescription("$today，已打卡")), useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertTrue(layouts.isNotEmpty())
+        layouts.forEach { layout ->
+            val color = layout.layoutInput.style.color
+            assertTrue(color != Color.Unspecified)
+            val a = color.luminance()
+            val b = background.luminance()
+            assertTrue((maxOf(a, b) + 0.05f) / (minOf(a, b) + 0.05f) >= 4.5f,
+                "completed date numbers must have 4.5:1 contrast")
+        }
     }
 
     private class ScreenRepository(habit: Habit, initialRecords: List<HabitRecord>) : HabitRepository {

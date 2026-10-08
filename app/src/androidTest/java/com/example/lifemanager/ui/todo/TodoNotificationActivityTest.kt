@@ -70,6 +70,8 @@ class TodoNotificationActivityTest {
             // ActivityScenario matches lifecycle callbacks by launch-intent identity.
             activity.startActivity(Intent(activity.intent)
                 .setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(com.example.lifemanager.notification.ReminderGeneration.EXTRA,
+                    requireNotNull(ViewModelProvider(activity)[TodoViewModel::class.java].uiState.value.generation).value)
                 .putExtra(extra, Long.MAX_VALUE))
         }
         compose.waitForIdle()

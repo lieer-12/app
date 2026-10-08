@@ -52,11 +52,12 @@ class ReminderBroadcastRunnerAdmissionTest {
         var finishes = 0
         var calibrations = 0
         var deliveries = 0
-        val job = runner.launch({ finishes++ }, { calibrations++ }) { deliveries++ }
+        val job = runner.launch({ finishes++ }, { calibrations++ }, DataGeneration(37)) { deliveries++ }
+        runCurrent() // Start source validation on IO before beginning maintenance.
         val ready = CompletableDeferred<Unit>()
         val maintenance = backgroundScope.async { coordinator.withSession { ready.complete(Unit) } }
         try {
-            assertTrue(readEntered.isCompleted, "Arrival must enter counted capture before dispatch")
+            assertTrue(readEntered.isCompleted, "Source validation must hold counted admission on IO")
             runCurrent()
             assertEquals(MaintenanceState.DRAINING, coordinator.state.value)
             assertFalse(ready.isCompleted)
@@ -93,7 +94,7 @@ class ReminderBroadcastRunnerAdmissionTest {
         var calibrations = 0
         var finishes = 0
         fixture.coordinator.withSession {
-            val job = runner.launch({ finishes++ }, { calibrations++ }) { deliveries++ }
+            val job = runner.launch({ finishes++ }, { calibrations++ }, DataGeneration(37)) { deliveries++ }
             assertTrue(job.isCompleted, "Busy broadcast must end before IO dispatch or unfreeze")
             assertEquals(1, finishes)
             assertEquals(1, calibrations)
@@ -111,7 +112,7 @@ class ReminderBroadcastRunnerAdmissionTest {
         var deliveries = 0
         var finishes = 0
         fixture.coordinator.withSession {
-            val job = runner.launch({ finishes++ }, { error("synthetic enqueue failure") }) { deliveries++ }
+            val job = runner.launch({ finishes++ }, { error("synthetic enqueue failure") }, DataGeneration(37)) { deliveries++ }
             assertTrue(job.isCompleted)
             assertEquals(1, finishes)
             assertEquals(0, deliveries)
@@ -126,7 +127,7 @@ class ReminderBroadcastRunnerAdmissionTest {
         var deliveries = 0
         var calibrations = 0
         var finishes = 0
-        val job = runner.launch({ finishes++ }, { calibrations++ }) { deliveries++ }
+        val job = runner.launch({ finishes++ }, { calibrations++ }, DataGeneration(37)) { deliveries++ }
         assertFalse(job.isCompleted)
         fixture.coordinator.withSession {
             runCurrent()
@@ -146,7 +147,7 @@ class ReminderBroadcastRunnerAdmissionTest {
         var deliveries = 0
         var calibrations = 0
         var finishes = 0
-        val job = runner.launch({ finishes++ }, { calibrations++ }) { deliveries++ }
+        val job = runner.launch({ finishes++ }, { calibrations++ }, DataGeneration(37)) { deliveries++ }
         fixture.coordinator.withSession { session ->
             fixture.coordinator.withMaintenance(session) { fixture.generations.commit(session.generation) {} }
         }
@@ -162,7 +163,7 @@ class ReminderBroadcastRunnerAdmissionTest {
         val runner = ReminderBroadcastRunner(fixture.coordinator, StandardTestDispatcher(testScheduler))
         var cancelledWork = false
         var finishes = 0
-        val job = runner.launch({ finishes++ }, { error("must not calibrate on timeout") }) {
+        val job = runner.launch({ finishes++ }, { error("must not calibrate on timeout") }, DataGeneration(37)) {
             try { CompletableDeferred<Unit>().await() } finally { cancelledWork = true }
         }
         runCurrent()
@@ -187,7 +188,7 @@ class ReminderBroadcastRunnerAdmissionTest {
         val runner = ReminderBroadcastRunner(fixture.coordinator, StandardTestDispatcher(testScheduler))
         var finishes = 0
         var calibrations = 0
-        val job = runner.launch({ finishes++ }, { calibrations++ }) { CompletableDeferred<Unit>().await() }
+        val job = runner.launch({ finishes++ }, { calibrations++ }, DataGeneration(37)) { CompletableDeferred<Unit>().await() }
         runCurrent()
         job.cancel(CancellationException("synthetic broadcast cancellation"))
         runCurrent()
@@ -203,7 +204,7 @@ class ReminderBroadcastRunnerAdmissionTest {
         var attempts = 0
         var calibrations = 0
         var finishes = 0
-        val job = runner.launch({ finishes++ }, { calibrations++ }) { attempts++; error("synthetic read failure") }
+        val job = runner.launch({ finishes++ }, { calibrations++ }, DataGeneration(37)) { attempts++; error("synthetic read failure") }
         runCurrent()
         assertTrue(job.isCompleted)
         assertEquals(1, finishes)
@@ -220,7 +221,7 @@ class ReminderBroadcastRunnerAdmissionTest {
         var finishes = 0
         startReminderBroadcast(
             RuntimeEnvironment.getApplication(), { error("synthetic provider failure") },
-            { finishes++ }, { calibrations++ }, { deliveries++ },
+            { finishes++ }, { calibrations++ }, DataGeneration(37), { deliveries++ },
         )
         runCurrent()
         assertEquals(1, finishes)

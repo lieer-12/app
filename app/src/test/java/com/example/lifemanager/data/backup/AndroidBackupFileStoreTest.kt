@@ -15,6 +15,31 @@ class AndroidBackupFileStoreTest {
     @get:Rule val temporary = TemporaryFolder()
     private val location = BackupLocation("content://backup.test/document")
 
+    @Test fun initializationOnlyRemovesOwnedOrphansNotOtherFilesOrDirectories() = runTest {
+        val directory = temporary.newFolder()
+        val orphan = File.createTempFile("input-", ".tmp", directory).apply { writeText("synthetic previous input") }
+        val unrelated = File(directory, "keep.json").apply { writeText("synthetic unrelated file") }
+        val similar = File(directory, "input-keep.tmp").apply { writeText("not an owned input") }
+        val nested = File(directory, "input-123.tmp").apply { mkdir(); File(this, "keep").writeText("no recursive deletion") }
+        store(Streams(byteArrayOf()), UnconfinedTestDispatcher(testScheduler), directory).initializePrivateStorage()
+        assertFalse(orphan.exists())
+        assertTrue(unrelated.exists())
+        assertTrue(similar.exists())
+        assertTrue(File(nested, "keep").exists())
+    }
+
+    @Test fun secondStoreInitializationCannotDeleteFirstStoresActiveStagedInput() = runTest {
+        val directory = temporary.newFolder()
+        val dispatcher = UnconfinedTestDispatcher(testScheduler)
+        val first = store(Streams(byteArrayOf(1)), dispatcher, directory)
+        first.withStagedInput(location, 16) {
+            val activeFile = directory.listFiles()!!.single()
+            store(Streams(byteArrayOf()), dispatcher, directory).initializePrivateStorage()
+            assertTrue(activeFile.exists())
+        }
+        assertTrue(directory.listFiles()!!.isEmpty())
+    }
+
     @Test fun boundedReadAcceptsExactLimitWithoutTrustingAvailableAndClosesInput() = runTest {
         val access = Streams(ByteArray(16) { it.toByte() })
         val store = store(access, UnconfinedTestDispatcher(testScheduler))

@@ -74,6 +74,25 @@ class ReminderWorkerMaintenanceTest {
         assertEquals(0, alarms().size)
     }
 
+    @Test fun workerHonorsDisabledSettingsAndDoesNotRearmOnAnotherPass(): Unit = runBlocking {
+        val coordinator = MaintenanceCoordinator(TestGenerations(7))
+        val settings = ReminderTestSettings()
+        TodoRepositoryImpl(database).saveTodo(Todo(title = "disabled fixture", dueAt = Instant.now().plusSeconds(3600)), emptyList())
+        val worker = worker(coordinator, settings = settings)
+        assertEquals(ListenableWorker.Result.success(), worker.doWork())
+        assertEquals(1, alarms().size)
+        settings.updateSettings { it.copy(todoReminders = false, scheduleReminders = false, subscriptionReminders = false) }
+        repeat(2) { assertEquals(ListenableWorker.Result.success(), worker.doWork()) }
+        assertEquals(0, alarms().size)
+    }
+
+    @Test fun workerRetriesUnreadableSettingsWithoutInstallingAlarms(): Unit = runBlocking {
+        val settings = ReminderTestSettings().apply { failure = IllegalStateException("settings unreadable") }
+        val worker = worker(MaintenanceCoordinator(TestGenerations(7)), settings = settings)
+        assertEquals(ListenableWorker.Result.retry(), worker.doWork())
+        assertEquals(0, alarms().size)
+    }
+
     @Test fun globalAdmissionCoversTheRepositoryReadUntilCalibrationFinishes(): Unit = runBlocking {
         val coordinator = MaintenanceCoordinator(TestGenerations(7))
         val entered = CompletableDeferred<Unit>()
@@ -121,12 +140,14 @@ class ReminderWorkerMaintenanceTest {
 
     private fun alarms() = shadowOf(RuntimeEnvironment.getApplication().getSystemService(AlarmManager::class.java)).scheduledAlarms
 
-    private fun worker(coordinator: MaintenanceCoordinator, todos: TodoRepository = TodoRepositoryImpl(database)): ReminderReconciliationWorker {
+    private fun worker(coordinator: MaintenanceCoordinator, todos: TodoRepository = TodoRepositoryImpl(database), settings: ReminderTestSettings = ReminderTestSettings()): ReminderReconciliationWorker {
         val context = RuntimeEnvironment.getApplication()
+        // These Worker admission fixtures never commit; the dedicated integration tests use Room metadata.
+        val state = ReminderSchedulingState(TestGenerations(7), settings)
         val reconciler = ReminderReconciler(
-            todos, ReminderScheduler(context),
-            ScheduleRepositoryImpl(database), ScheduleReminderScheduler(context),
-            SubscriptionRepositoryImpl(database), SubscriptionReminderScheduler(context), coordinator,
+            todos, ReminderScheduler(context) { state },
+            ScheduleRepositoryImpl(database), ScheduleReminderScheduler(context, { state }, { ScheduleRepositoryImpl(database) }),
+            SubscriptionRepositoryImpl(database), SubscriptionReminderScheduler(context) { state }, coordinator, settings, ReminderNotifications(context),
         )
         return ReminderReconciliationWorker(context, parameters()) { reconciler }
     }

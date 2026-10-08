@@ -8,6 +8,8 @@ data class BackupLocation(val value: String) {
 class BackupFileException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 interface BackupFileStore {
+    /** Once per process, before any private staging file becomes active. */
+    suspend fun initializePrivateStorage() = Unit
     /** Return only after flush/close. The caller must independently reopen and verify. */
     suspend fun write(location: BackupLocation, bytes: ByteArray)
     suspend fun read(location: BackupLocation, maxBytes: Int): ByteArray

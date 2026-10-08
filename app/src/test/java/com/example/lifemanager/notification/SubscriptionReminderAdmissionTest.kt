@@ -120,7 +120,7 @@ class SubscriptionReminderAdmissionTest {
     }
 
     // Rejecting every arrival, assuming generation 0, or bypassing Room qualification loses this post.
-    @Test fun idleLegacyPayloadQualifiesFromRealRoomAtANonzeroGeneration(): Unit = runTest {
+    @Test fun idleSourcePayloadQualifiesFromRealRoomAtANonzeroGeneration(): Unit = runTest {
         val subscription = saveDueSubscription()
         val pending = receive(subscription)
         settleBroadcast(pending)
@@ -162,11 +162,11 @@ class SubscriptionReminderAdmissionTest {
             }
         }
         // Keep even the Android scheduler real; count entry to catch side effects on rejected paths.
-        val realScheduler by lazy { SubscriptionReminderScheduler(context) }
+        val realScheduler by lazy { SubscriptionReminderScheduler(context) { admission.scheduling } }
         val observedScheduler = object : SubscriptionReminderSchedulerContract {
-            override fun schedule(subscription: Subscription, reminderDays: Set<Int>) {
+            override suspend fun scheduleCurrent(subscription: Subscription, reminderDays: Set<Int>) {
                 alarmOperations++
-                realScheduler.schedule(subscription, reminderDays)
+                realScheduler.scheduleCurrent(subscription, reminderDays)
             }
             override fun cancel(subscriptionId: Long, reminderDays: Set<Int>) {
                 alarmOperations++
@@ -184,9 +184,11 @@ class SubscriptionReminderAdmissionTest {
             dispatcher = dispatcher,
             runnerProvider = { ReminderBroadcastRunner(admission.coordinator, dispatcher) },
             onBusy = { calibrationRequests++ },
+            settingsProvider = { admission.settings },
         )
         val intent = Intent("com.example.lifemanager.TEST_SUBSCRIPTION_ADMISSION")
             .setData(Uri.parse(ReminderKey.subscriptionData(subscription.id, 1, subscription.nextBillingDate)))
+            .putExtra(ReminderGeneration.EXTRA, 37L)
             .putExtra(SubscriptionReminderReceiver.EXTRA_SUBSCRIPTION_ID, subscription.id)
             .putExtra(SubscriptionReminderReceiver.EXTRA_DAYS_BEFORE, 1)
             .putExtra(SubscriptionReminderReceiver.EXTRA_DUE_DATE, subscription.nextBillingDate.toString())
@@ -198,7 +200,7 @@ class SubscriptionReminderAdmissionTest {
             shadowOf(Looper.getMainLooper()).idle()
         } finally { context.unregisterReceiver(receiver) }
         val receiverShadow = shadowOf(receiver)
-        assertTrue(receiverShadow.wentAsync(), "Valid legacy payload must enter the real receiver")
+        assertTrue(receiverShadow.wentAsync(), "Valid source payload must enter the real receiver")
         return shadowOf(assertNotNull(receiverShadow.originalPendingResult))
     }
 

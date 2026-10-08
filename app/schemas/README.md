@@ -7,5 +7,8 @@ Version 5 adds only `app_settings` (persisted preferences) and `app_maintenance`
 unchanged. `4 -> 5` creates these two tables and seeds id=1 defaults; earlier
 migrations remain registered. No generation is imported from a user backup.
 
-Phase 5 backup/restore and generation-based maintenance are not implemented yet.
-The v5 snapshot is a schema artifact, not a functional acceptance result.
+Phase 5 backup/restore now uses the fixed v5 business schema in a single Room
+transaction, together with settings replacement and local generation advancement.
+Clear removes business rows but preserves settings. No schema v6 or migration is
+needed: the schema itself has not changed. Functional verification is recorded
+separately in docs/phase5-acceptance.md; a schema snapshot is not acceptance proof.

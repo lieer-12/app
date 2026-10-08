@@ -1,6 +1,7 @@
 package com.example.lifemanager.domain.backup
 
 import com.example.lifemanager.domain.maintenance.MaintenanceCoordinator
+import com.example.lifemanager.domain.maintenance.DataGeneration
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -13,8 +14,8 @@ class BackupFileUseCases(
     private val maintenance: MaintenanceCoordinator,
     private val workDispatcher: CoroutineDispatcher,
 ) {
-    suspend fun export(location: BackupLocation, appVersion: String, exportedAt: String): BackupDocument = withContext(workDispatcher) {
-        val token = maintenance.capture()
+    suspend fun export(location: BackupLocation, appVersion: String, exportedAt: String, expected: DataGeneration? = null): BackupDocument = withContext(workDispatcher) {
+        val token = expected ?: maintenance.capture()
         val payload = maintenance.run(token) { repository.snapshot() }
         // Snapshot admission ends here. Slow provider I/O must not delay a maintenance session.
         writeVerified(location, BackupDocument(appVersion, exportedAt, payload))

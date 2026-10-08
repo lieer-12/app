@@ -13,6 +13,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 internal interface BackupStreamAccess {
     fun openRead(location: BackupLocation): InputStream?
@@ -38,6 +40,27 @@ class AndroidBackupFileStore internal constructor(
 ) : BackupFileStore {
     @Inject constructor(@ApplicationContext context: Context, @IoDispatcher dispatcher: CoroutineDispatcher) :
         this(ContentResolverBackupStreams(context.contentResolver), File(context.cacheDir, "backup-inputs"), dispatcher)
+
+    override suspend fun initializePrivateStorage(): Unit = withContext(dispatcher) {
+        fileErrors {
+            storageInitialization.withLock {
+                val path = stagingDirectory.canonicalPath
+                if (path !in initializedDirectories) {
+                    if (!stagingDirectory.isDirectory && !stagingDirectory.mkdirs() && !stagingDirectory.isDirectory) {
+                        throw BackupFileException("无法创建私有备份临时区")
+                    }
+                    val previous = stagingDirectory.listFiles() ?: throw BackupFileException("无法检查私有备份临时区")
+                    for (file in previous) {
+                        currentCoroutineContext().ensureActive()
+                        if (file.isFile && ownedInputName.matches(file.name) && !file.delete() && file.exists()) {
+                            throw BackupFileException("无法清理上次中断的私有备份临时文件")
+                        }
+                    }
+                    initializedDirectories += path
+                }
+            }
+        }
+    }
 
     override suspend fun write(location: BackupLocation, bytes: ByteArray): Unit = withContext(dispatcher) {
         if (bytes.size > limits.maxBytes) throw BackupValidationException("备份超过文件大小限制")
@@ -73,6 +96,7 @@ class AndroidBackupFileStore internal constructor(
         var owned: File? = null
         var failure: Throwable? = null
         try {
+            initializePrivateStorage()
             val bytes = fileErrors {
                 currentCoroutineContext().ensureActive()
                 if (!stagingDirectory.isDirectory && !stagingDirectory.mkdirs() && !stagingDirectory.isDirectory) {
@@ -141,5 +165,10 @@ class AndroidBackupFileStore internal constructor(
         throw BackupFileException("无法访问文档，请重新选择文件并授予访问权限", error)
     }
 
-    private companion object { const val BUFFER_SIZE = 8192 }
+    private companion object {
+        const val BUFFER_SIZE = 8192
+        val storageInitialization = Mutex()
+        val initializedDirectories = mutableSetOf<String>()
+        val ownedInputName = Regex("input--?[0-9]+\\.tmp")
+    }
 }

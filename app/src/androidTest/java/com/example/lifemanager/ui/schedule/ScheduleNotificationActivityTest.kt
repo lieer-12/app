@@ -73,6 +73,8 @@ class ScheduleNotificationActivityTest {
             // Preserve that identity while still delivering a real onNewIntent event.
             activity.startActivity(Intent(activity.intent)
                 .setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(com.example.lifemanager.notification.ReminderGeneration.EXTRA,
+                    requireNotNull(ViewModelProvider(activity)[ScheduleViewModel::class.java].uiState.value.generation).value)
                 .putExtra(extra, Long.MAX_VALUE))
         }
         compose.waitForIdle()

@@ -23,6 +23,7 @@ class TodoReminderReceiver(
         ReminderBroadcastRunner.fromApplication(it, dispatcher)
     },
     private val onBusy: (Context) -> Unit = { ReminderReconciliationWorker.enqueueImmediate(it) },
+    private val settingsProvider: (Context) -> com.example.lifemanager.domain.repository.SettingsRepository = ::reminderSettings,
 ) : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val todoId = intent.getLongExtra(EXTRA_TODO_ID, 0L)
@@ -30,15 +31,19 @@ class TodoReminderReceiver(
             intent.dataString != "lifemanager://todo-reminder/$todoId") return
         val dueMillis = intent.getLongExtra(EXTRA_DUE_AT, Long.MIN_VALUE)
         val pendingResult = goAsync()
-        startReminderBroadcast(context, runnerProvider, { pendingResult?.finish() }, onBusy) {
+        val generation = ReminderGeneration.read(intent)
+        startReminderBroadcast(context, runnerProvider, { pendingResult?.finish() }, onBusy, generation) {
             TodoOperationCoordinator.run {
+                if (!settingsProvider(context).getSettings().todoReminders) return@run
                 val todo = repositoryProvider(context).getAllTodos().firstOrNull { it.id == todoId }
                     ?: return@run
                 val dueAt = todo.dueAt ?: return@run
                 val now = Instant.now()
                 if (todo.isCompleted || dueAt.toEpochMilli() != dueMillis || !dueAt.isAfter(now) ||
                     now.isBefore(dueAt.minusSeconds(15 * 60)) || todo.title.isBlank()) return@run
-                NotificationHelper.showTodoReminder(context, todo.id, todo.title)
+                if (settingsProvider(context).getSettings().todoReminders) {
+                    NotificationHelper.showTodoReminder(context, todo.id, todo.title, requireNotNull(generation))
+                }
             }
         }
     }

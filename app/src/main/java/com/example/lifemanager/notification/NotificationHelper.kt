@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Bundle
+import com.example.lifemanager.domain.maintenance.DataGeneration
 import androidx.core.content.ContextCompat
 import com.example.lifemanager.MainActivity
 
@@ -27,21 +29,22 @@ object NotificationHelper {
         }
     }
 
-    fun showTodoReminder(context: Context, todoId: Long, title: String) {
-        showReminder(context, ReminderKey.forTodo(todoId), "待办提醒", title, TodoReminderReceiver.EXTRA_TODO_ID, todoId)
+    fun showTodoReminder(context: Context, todoId: Long, title: String, generation: DataGeneration) {
+        showReminder(context, ReminderKey.forTodo(todoId), "待办提醒", title, TodoReminderReceiver.EXTRA_TODO_ID, todoId, generation, "todo")
     }
 
-    fun showScheduleReminder(context: Context, scheduleId: Long, title: String) {
-        showReminder(context, ReminderKey.forSchedule(scheduleId), "日程提醒", title, ScheduleReminderReceiver.EXTRA_SCHEDULE_ID, scheduleId)
+    fun showScheduleReminder(context: Context, scheduleId: Long, title: String, generation: DataGeneration) {
+        showReminder(context, ReminderKey.forSchedule(scheduleId), "日程提醒", title, ScheduleReminderReceiver.EXTRA_SCHEDULE_ID, scheduleId, generation, "schedule")
     }
 
-    private fun showReminder(context: Context, notificationId: Int, notificationTitle: String, title: String, extraKey: String, id: Long) {
+    private fun showReminder(context: Context, notificationId: Int, notificationTitle: String, title: String, extraKey: String, id: Long, generation: DataGeneration, module: String) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
 
         createChannel(context)
         val intent = Intent(context, MainActivity::class.java).putExtra(extraKey, id)
+            .putExtra(ReminderGeneration.EXTRA, generation.value)
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val openIntent = PendingIntent.getActivity(
             context,
@@ -55,8 +58,15 @@ object NotificationHelper {
             .setContentText(title)
             .setContentIntent(openIntent)
             .setAutoCancel(true)
+            .addExtras(Bundle().apply {
+                putLong(ReminderGeneration.EXTRA, generation.value)
+                putString(ReminderNotifications.MODULE, module)
+            })
             .build()
-        context.getSystemService(NotificationManager::class.java)
-            .notify(notificationId, notification)
+        try {
+            context.getSystemService(NotificationManager::class.java).notify(notificationId, notification)
+        } catch (_: SecurityException) {
+            // Notification permission may be revoked after the preflight check.
+        }
     }
 }

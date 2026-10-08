@@ -1,13 +1,5 @@
 package com.example.lifemanager.ui.settings
 
-import android.Manifest
-import android.app.AlarmManager
-import android.content.pm.PackageManager
-import android.content.Intent
-import android.net.Uri
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,6 +12,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
@@ -34,9 +28,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
@@ -48,27 +40,32 @@ import com.example.lifemanager.domain.model.DateFormat
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit, viewModel: SettingsViewModel = hiltViewModel()) {
+fun SettingsScreen(onBack: () -> Unit, viewModel: SettingsViewModel = hiltViewModel(), backupViewModel: BackupSettingsViewModel? = null) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val renderedGeneration = state.generation
+    val backup = backupViewModel?.uiState?.collectAsStateWithLifecycle()?.value
+    androidx.activity.compose.BackHandler(enabled = backup?.busy == true) {
+        if (backup?.canCancel == true) backup.operationId?.let { backupViewModel.cancel(it) }
+    }
     SettingsContent(state, { viewModel.setTheme(it, renderedGeneration) }, { viewModel.retry(renderedGeneration) }, onBack,
         { viewModel.setDateFormat(it, renderedGeneration) }, { viewModel.setDefaultCurrency(it, renderedGeneration) },
-        { day, selected -> viewModel.setDefaultReminderDay(day, selected, renderedGeneration) })
+        { day, selected -> viewModel.setDefaultReminderDay(day, selected, renderedGeneration) },
+        onReminderEnabledChanged = { module, enabled -> viewModel.setReminderEnabled(module, enabled, renderedGeneration) },
+        operationBusy = backup?.busy == true,
+        backupSection = {
+            if (backup != null) BackupSettingsSection(backup,
+                state.isAvailable && !state.isLoading && !state.isSaving && !state.isMaintaining, renderedGeneration, backupViewModel)
+        })
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsContent(state: SettingsUiState, onThemeChanged: (ThemeMode) -> Unit, onRetry: () -> Unit, onBack: () -> Unit,
     onDateFormatChanged: (DateFormat) -> Unit = {}, onCurrencyChanged: (String) -> Unit = {},
-    onReminderDayChanged: (Int, Boolean) -> Unit = { _, _ -> }) {
-    val context = LocalContext.current
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { }
-    val notificationGranted = Build.VERSION.SDK_INT < 33 ||
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-    val exactAlarmGranted = Build.VERSION.SDK_INT < 31 ||
-        context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+    onReminderDayChanged: (Int, Boolean) -> Unit = { _, _ -> },
+    onReminderEnabledChanged: (String, Boolean) -> Unit = { _, _ -> },
+    operationBusy: Boolean = false,
+    backupSection: @Composable () -> Unit = {}) {
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("设置") }) },
@@ -84,7 +81,7 @@ fun SettingsContent(state: SettingsUiState, onThemeChanged: (ThemeMode) -> Unit,
             }
             state.settings?.let { saved ->
                 Text("主题", style = MaterialTheme.typography.titleLarge)
-                val editable = state.isAvailable && !state.isLoading && !state.isSaving && !state.isMaintaining
+                val editable = state.isAvailable && !state.isLoading && !state.isSaving && !state.isMaintaining && !operationBusy
                 listOf(ThemeMode.SYSTEM to "跟随系统", ThemeMode.LIGHT to "浅色", ThemeMode.DARK to "深色").forEach { (mode, label) ->
                     Row(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(
                         selected = saved.theme == mode, enabled = editable, role = Role.RadioButton,
@@ -120,27 +117,23 @@ fun SettingsContent(state: SettingsUiState, onThemeChanged: (ThemeMode) -> Unit,
                 }
                 Text(if (saved.defaultReminderDays.isEmpty()) "当前默认不安排提醒" else "提醒使用本地 09:00；实际投递仍需系统权限。")
                 Text("只用于之后新建的订阅；不会换算现有金额或覆盖现有提醒，统计仍仅汇总 CNY。", style = MaterialTheme.typography.bodySmall)
+                Text("模块提醒", style = MaterialTheme.typography.titleLarge)
+                listOf(Triple("todo", "待办提醒", saved.todoReminders), Triple("schedule", "日程提醒", saved.scheduleReminders),
+                    Triple("subscription", "订阅提醒", saved.subscriptionReminders)).forEach { (module, label, checked) ->
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(label, modifier = Modifier.weight(1f))
+                        androidx.compose.material3.Switch(checked = checked, enabled = editable,
+                            onCheckedChange = { onReminderEnabledChanged(module, it) },
+                            modifier = Modifier.semantics { contentDescription = label })
+                    }
+                }
+                Text("关闭会撤销该模块的提醒与通知；重新开启将从本地记录重建。打卡提醒尚未实现。", style = MaterialTheme.typography.bodySmall)
             }
+            backupSection()
             Text("已完成模块", style = MaterialTheme.typography.titleLarge)
             Text("当前已启用待办、日程、打卡和订阅费用管理。打卡提醒、暂停和归档尚未实现。")
-            Text(if (notificationGranted) "通知权限：已允许" else "通知权限：未允许")
-            if (Build.VERSION.SDK_INT >= 33 && !notificationGranted) {
-                Button(onClick = { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }) {
-                    Text("允许本地提醒")
-                }
-            }
-            Text(if (exactAlarmGranted) "精确提醒：已允许" else "精确提醒：未允许，将使用系统兜底调度")
-            if (Build.VERSION.SDK_INT >= 31 && !exactAlarmGranted) {
-                Button(onClick = {
-                    context.startActivity(
-                        Intent(
-                            android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
-                            Uri.parse("package:${context.packageName}"),
-                        ),
-                    )
-                }) { Text("允许精确提醒") }
-            }
-            Button(onClick = onBack) { Text("返回待办") }
+            SettingsPlatformSection()
+            Button(onClick = onBack, enabled = !operationBusy && !state.isMaintaining) { Text("返回待办") }
         }
     }
 }

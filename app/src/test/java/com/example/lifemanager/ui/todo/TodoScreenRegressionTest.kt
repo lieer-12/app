@@ -12,6 +12,10 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.hasText
@@ -20,6 +24,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.lifecycle.viewModelScope
 import com.example.lifemanager.domain.model.*
 import com.example.lifemanager.domain.repository.TodoRepository
@@ -147,6 +152,39 @@ class TodoScreenRegressionTest {
 
     private fun waitUntilAvailable() {
         compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.isAvailable }
+    }
+
+    // A decorative progress track must not hide the real completion ratio from TalkBack.
+    @Test fun summaryPublishesActualCompletionRatioAsAccessibleProgress() {
+        val now = Instant.now()
+        model = TodoViewModel(ScreenRepository(listOf(
+            Todo(id = 1, title = "已完成", isCompleted = true, completedAt = now, dueAt = now),
+            Todo(id = 2, title = "待完成", dueAt = now),
+        )), NoAlarms, Dispatchers.IO, testGenerationAccess())
+        show()
+        waitUntilAvailable()
+        compose.onNode(SemanticsMatcher.expectValue(
+            SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(0.5f, 0f..1f),
+        )).assertExists()
+        compose.onNodeWithText("已完成 1 项 · 待完成 1 项").assertExists()
+    }
+
+    // Search-empty must not claim the underlying database has no tasks, nor block recovery.
+    @Test fun searchEmptyStateDistinguishesFilteredResultsAndSearchStillRecovers() {
+        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "保留的记录"))),
+            NoAlarms, Dispatchers.IO, testGenerationAccess())
+        show()
+        waitUntilAvailable()
+        compose.runOnIdle { model.onFilterChanged(TodoFilter(dateFilter = TodoDateFilter.ALL, query = "不匹配")) }
+        compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.todos.isEmpty() }
+        // The compact Robolectric viewport intentionally exercises the scrollable empty item.
+        compose.onNodeWithText("没有符合条件的待办").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("搜索").performClick()
+        compose.onNode(hasSetTextAction()).performTextReplacement("")
+        compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.todos.size == 1 }
+        compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange))
+            .performScrollToNode(hasText("保留的记录"))
+        compose.onNodeWithText("保留的记录").assertIsDisplayed()
     }
 
     @Test fun notificationReturningFromSettingsUsesRetainedTodoDraftOwner() {

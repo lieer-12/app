@@ -109,7 +109,7 @@ private fun HabitContent(
         topBar = { TopAppBar(title = { Text("打卡") }) },
         floatingActionButton = {
             if (state.selectedTab == HabitTab.TASKS && state.isAvailable && !state.isMaintaining) {
-                FloatingActionButton(onClick = { onOpenEditor(null) }) { Text("新增") }
+                FloatingActionButton(onClick = { onOpenEditor(null) }, modifier = Modifier.semantics { contentDescription = "添加习惯" }) { Text("新增") }
             }
         },
     ) { padding ->
@@ -301,11 +301,16 @@ private fun RowScope.CalendarDay(day: HabitCalendarDay) {
         day.isExpected -> MaterialTheme.colorScheme.secondaryContainer
         else -> Color.Transparent
     }
+    val foreground = when {
+        day.isCompleted -> MaterialTheme.colorScheme.onPrimary
+        day.isExpected -> MaterialTheme.colorScheme.onSecondaryContainer
+        else -> MaterialTheme.colorScheme.onSurface
+    }
     val label = "${displayDate(day.date)}，${if (day.isCompleted) "已打卡" else if (day.isExpected) "应打卡，未完成" else "非打卡日"}"
     Box(
         modifier = Modifier.weight(1f).height(44.dp).padding(3.dp).background(background).semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
-    ) { Text(day.date.dayOfMonth.toString(), textAlign = TextAlign.Center) }
+    ) { Text(day.date.dayOfMonth.toString(), color = foreground, textAlign = TextAlign.Center) }
 }
 
 @Composable

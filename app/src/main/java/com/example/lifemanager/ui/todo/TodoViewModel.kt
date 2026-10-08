@@ -461,10 +461,10 @@ class TodoViewModel @Inject constructor(
 
     private fun detail(error: Exception) = error.message ?: "未知错误"
 
-    private fun reconcileReminder(todo: Todo) {
+    private suspend fun reconcileReminder(todo: Todo) {
         val dueAt = todo.dueAt
         if (todo.isCompleted || dueAt == null) reminderScheduler.cancel(todo.id)
-        else reminderScheduler.schedule(todo.id, todo.title, dueAt)
+        else reminderScheduler.scheduleCurrent(todo.id, todo.title, dueAt)
     }
 
     private data class Snapshot(val visible: List<Todo>, val all: List<Todo>, val tags: List<Tag>)

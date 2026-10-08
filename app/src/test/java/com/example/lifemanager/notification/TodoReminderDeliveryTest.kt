@@ -117,6 +117,7 @@ class TodoReminderDeliveryTest {
         }
         val receiver = admission.todoReceiver(observedRepository, StandardTestDispatcher(testScheduler))
         receiver.onReceive(context, Intent().setData(Uri.parse("lifemanager://todo-reminder/$id"))
+            .putExtra(ReminderGeneration.EXTRA, 37L)
             .putExtra("todo_id", id).putExtra("todo_title", "旧标题").putExtra("todo_due_at", due.toEpochMilli()))
     }
 

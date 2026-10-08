@@ -57,12 +57,22 @@ abstract class GenerationNavigationViewModel<R : GenerationNavigationRequest>(
     }
 
     fun open(entityId: Long) {
+        openRequest(entityId, null, captureLocal = true)
+    }
+
+    /** Notification payloads must supply their original generation; missing is never recaptured. */
+    fun openFromNotification(entityId: Long, sourceGeneration: DataGeneration?) {
+        if (sourceGeneration == null) return
+        openRequest(entityId, sourceGeneration, captureLocal = false)
+    }
+
+    private fun openRequest(entityId: Long, sourceGeneration: DataGeneration?, captureLocal: Boolean) {
         if (entityId <= 0L || access.maintenance.value != MaintenanceState.IDLE) return
         val token = sequence.incrementAndGet()
         viewModelScope.launch(dispatcher, start = CoroutineStart.UNDISPATCHED) {
             try {
                 // Enter the counted strict read before dispatch; never substitute a later generation.
-                val original = access.capture()
+                val original = if (captureLocal) access.capture() else requireNotNull(sourceGeneration)
                 val request = requestFor(token, entityId, original)
                 access.publishResult(original) {
                     if (sequence.get() == token) requests.value = request
@@ -83,18 +93,33 @@ abstract class GenerationNavigationViewModel<R : GenerationNavigationRequest>(
         request: R,
         awaitGraph: suspend () -> Unit = {},
         navigate: () -> Unit,
+    ): Boolean = deliverIfAllowed(request, awaitGraph, canNavigate = { true }, navigate = navigate)
+
+    /** A UI veto retains the request; optional readiness waiting/retry occurs outside the permit. */
+    suspend fun deliverIfAllowed(
+        request: R,
+        awaitGraph: suspend () -> Unit = {},
+        awaitUiReady: (suspend () -> Unit)? = null,
+        canNavigate: () -> Boolean,
+        navigate: () -> Unit,
     ): Boolean {
         val original = request.originalDataGeneration
         awaitGraph()
         return withContext(dispatcher) {
             while (true) {
                 try {
-                    return@withContext access.run(original) {
+                    var uiBlocked = false
+                    val delivered = access.run(original) {
                         withContext(Dispatchers.Main.immediate) {
                             if (requests.value != request) false
+                            else if (!canNavigate()) { uiBlocked = true; false }
                             else { navigate(); true }
                         }
                     }
+                    if (!uiBlocked || awaitUiReady == null) return@withContext delivered
+                    // Only a UI veto is retryable here. Stale/superseded/unreadable requests stop.
+                    awaitUiReady()
+                    yield()
                 } catch (_: MaintenanceBusyException) {
                     // This is an already admitted arrival, not a new event queued during Busy.
                     access.maintenance.first { it == MaintenanceState.IDLE }

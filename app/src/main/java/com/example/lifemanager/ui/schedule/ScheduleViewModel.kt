@@ -265,7 +265,7 @@ class ScheduleViewModel @Inject constructor(
                         }
                         try {
                             reminderScheduler.cancel(id)
-                            reminderScheduler.schedule(candidate.copy(id = id))
+                            reminderScheduler.scheduleCurrent(candidate.copy(id = id))
                         } catch (error: Exception) {
                             if (error is CancellationException) throw error
                             withContext(Dispatchers.Main.immediate) {

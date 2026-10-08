@@ -10,17 +10,29 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lifemanager.ui.settings.SettingsScreen
 import com.example.lifemanager.ui.settings.SettingsViewModel
 import com.example.lifemanager.ui.habit.HabitScreen
@@ -46,13 +58,19 @@ fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
     subscriptionRequest: SubscriptionNavigationRequest? = null, onSubscriptionConsumed: (Long) -> Unit = {},
     todoNavigation: TodoNavigationViewModel? = null,
     scheduleNavigation: ScheduleNavigationViewModel? = null,
-    subscriptionNavigation: SubscriptionNavigationViewModel? = null) {
+    subscriptionNavigation: SubscriptionNavigationViewModel? = null,
+    backupViewModel: com.example.lifemanager.ui.settings.BackupSettingsViewModel? = null) {
     require(todoRequest == null || todoNavigation != null) { "待办通知必须由导航所有者交付" }
     require(scheduleRequest == null || scheduleNavigation != null) { "日程通知必须由导航所有者交付" }
     require(subscriptionRequest == null || subscriptionNavigation != null) { "订阅通知必须由导航所有者交付" }
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+    val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+    val backupBusy = backupViewModel?.uiState?.collectAsStateWithLifecycle()?.value?.busy == true
+    // Read the live owners at click delivery too, not only a potentially older rendered flag.
+    fun navigationAllowed() = !settingsViewModel.uiState.value.isMaintaining &&
+        backupViewModel?.uiState?.value?.busy != true
     val items = listOf(
         TodoRoute to ("待办" to Icons.Outlined.CheckCircle),
         ScheduleRoute to ("日程" to Icons.Outlined.CalendarMonth),
@@ -61,24 +79,36 @@ fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
         SettingsRoute to ("设置" to Icons.Outlined.Settings),
     )
 
-    LaunchedEffect(scheduleRequest?.token) {
+    LaunchedEffect(scheduleRequest?.token, backupBusy) {
+        if (backupBusy) return@LaunchedEffect
         scheduleRequest?.let { request ->
-            requireNotNull(scheduleNavigation).deliver(request, { navController.currentBackStackEntryFlow.first(); Unit }) {
-                navController.navigate(ScheduleRoute) { launchSingleTop = true }
+            requireNotNull(scheduleNavigation).deliverIfAllowed(request,
+                awaitGraph = { navController.currentBackStackEntryFlow.first(); Unit },
+                awaitUiReady = { backupViewModel?.uiState?.first { !it.busy }; Unit },
+                canNavigate = { backupViewModel?.uiState?.value?.busy != true }) {
+                navController.navigateTopLevel(ScheduleRoute)
             }
         }
     }
-    LaunchedEffect(todoRequest?.token) {
+    LaunchedEffect(todoRequest?.token, backupBusy) {
+        if (backupBusy) return@LaunchedEffect
         todoRequest?.let { request ->
-            requireNotNull(todoNavigation).deliver(request, { navController.currentBackStackEntryFlow.first(); Unit }) {
-                navController.navigate(TodoRoute) { launchSingleTop = true }
+            requireNotNull(todoNavigation).deliverIfAllowed(request,
+                awaitGraph = { navController.currentBackStackEntryFlow.first(); Unit },
+                awaitUiReady = { backupViewModel?.uiState?.first { !it.busy }; Unit },
+                canNavigate = { backupViewModel?.uiState?.value?.busy != true }) {
+                navController.navigateTopLevel(TodoRoute)
             }
         }
     }
-    LaunchedEffect(subscriptionRequest?.token) {
+    LaunchedEffect(subscriptionRequest?.token, backupBusy) {
+        if (backupBusy) return@LaunchedEffect
         subscriptionRequest?.let { request ->
-            requireNotNull(subscriptionNavigation).deliver(request, { navController.currentBackStackEntryFlow.first(); Unit }) {
-                navController.navigate(SubscriptionRoute) { launchSingleTop = true }
+            requireNotNull(subscriptionNavigation).deliverIfAllowed(request,
+                awaitGraph = { navController.currentBackStackEntryFlow.first(); Unit },
+                awaitUiReady = { backupViewModel?.uiState?.first { !it.busy }; Unit },
+                canNavigate = { backupViewModel?.uiState?.value?.busy != true }) {
+                navController.navigateTopLevel(SubscriptionRoute)
             }
         }
     }
@@ -86,14 +116,32 @@ fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
     Scaffold(
         modifier = modifier,
         bottomBar = {
-            NavigationBar {
-                items.forEach { (route, item) ->
-                    NavigationBarItem(
-                        selected = currentRoute == route,
-                        onClick = { navController.navigate(route) { launchSingleTop = true } },
-                        icon = { Icon(item.second, contentDescription = item.first) },
-                        label = { Text(item.first) },
-                    )
+            Surface(
+                modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                shadowElevation = 3.dp,
+            ) {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp,
+                    windowInsets = WindowInsets(0, 0, 0, 0),
+                ) {
+                    items.forEach { (route, item) ->
+                        NavigationBarItem(
+                            selected = currentRoute == route,
+                            enabled = !settingsState.isMaintaining && !backupBusy,
+                            onClick = { if (navigationAllowed()) navController.navigateTopLevel(route) },
+                            icon = { Icon(item.second, contentDescription = item.first) },
+                            label = { Text(item.first, fontWeight = if (currentRoute == route) FontWeight.Bold else FontWeight.Medium) },
+                            colors = NavigationBarItemDefaults.colors(
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    }
                 }
             }
         },
@@ -101,7 +149,7 @@ fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
         NavHost(
             navController = navController,
             startDestination = TodoRoute,
-            modifier = Modifier.padding(paddingValues),
+            modifier = Modifier.padding(paddingValues).consumeWindowInsets(paddingValues),
         ) {
             composable(TodoRoute) {
                 TodoScreen(
@@ -110,8 +158,10 @@ fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
                     notificationToken = todoRequest?.token,
                     initialNotificationGeneration = todoRequest?.originalDataGeneration,
                     onNotificationConsumed = onTodoConsumed,
-                    onOpenSettings = { navController.navigate(SettingsRoute) },
+                    onOpenSettings = { if (navigationAllowed()) navController.navigateTopLevel(SettingsRoute) },
+                    settingsNavigationEnabled = !settingsState.isMaintaining && !backupBusy,
                 )
+                MaintenanceBackGuard(settingsState.isMaintaining && !backupBusy)
             }
             composable(ScheduleRoute) {
                 ScheduleScreen(
@@ -121,9 +171,11 @@ fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
                     initialNotificationGeneration = scheduleRequest?.originalDataGeneration,
                     onNotificationConsumed = onScheduleConsumed,
                 )
+                MaintenanceBackGuard(settingsState.isMaintaining && !backupBusy)
             }
             composable(HabitRoute) {
                 HabitScreen()
+                MaintenanceBackGuard(settingsState.isMaintaining && !backupBusy)
             }
             composable(SubscriptionRoute) {
                 val viewModel: SubscriptionViewModel = hiltViewModel()
@@ -134,10 +186,20 @@ fun NavGraph(todoViewModel: TodoViewModel, scheduleViewModel: ScheduleViewModel,
                     }
                 }
                 SubscriptionScreen(viewModel = viewModel)
+                MaintenanceBackGuard(settingsState.isMaintaining && !backupBusy)
             }
             composable(SettingsRoute) {
-                SettingsScreen(onBack = { navController.popBackStack() }, viewModel = settingsViewModel)
+                SettingsScreen(onBack = { if (navigationAllowed()) navController.navigateTopLevel(TodoRoute) }, viewModel = settingsViewModel,
+                    backupViewModel = backupViewModel)
+                MaintenanceBackGuard(settingsState.isMaintaining && !backupBusy)
             }
         }
     }
+}
+
+@Composable
+private fun MaintenanceBackGuard(enabled: Boolean) {
+    // Register in the destination lifecycle, after NavHost's subcomposition. A root handler
+    // outside Scaffold registers too early. Settings still owns cancellation of busy backups.
+    androidx.activity.compose.BackHandler(enabled = enabled) {}
 }

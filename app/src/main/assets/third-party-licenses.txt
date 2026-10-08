@@ -1,0 +1,24 @@
+本项目主要运行时依赖（声明版本；最终解析版本以 Gradle 依赖报告为准）
+
+AndroidX Core 1.15.0、Activity 1.10.1、Lifecycle 2.8.7、Navigation 2.8.9、Room 2.8.2、WorkManager 2.10.0、Hilt Navigation Compose 1.2.0。
+Jetpack Compose / Material 3 / Material Icons：由 Compose BOM 2025.02.00 管理。
+版权归 Android Open Source Project / AndroidX 贡献者所有；Apache License 2.0。
+源码与许可：https://android.googlesource.com/platform/frameworks/support/
+
+Dagger / Hilt 2.57.2
+版权归 Dagger Authors / Google 及贡献者所有；Apache License 2.0。
+源码与许可：https://github.com/google/dagger
+
+Kotlin 标准库（Kotlin 插件 2.3.21）及 kotlinx.coroutines 1.9.0
+版权归 JetBrains s.r.o. 及贡献者所有；Apache License 2.0。
+源码与许可：https://github.com/JetBrains/kotlin/tree/master/license
+https://github.com/Kotlin/kotlinx.coroutines/blob/master/LICENSE.txt
+
+kotlinx.serialization 1.8.1（Navigation 间接依赖，项目通过 BOM 对齐）
+版权归 JetBrains s.r.o. 及贡献者所有；Apache License 2.0。
+源码与许可：https://github.com/Kotlin/kotlinx.serialization/blob/v1.8.1/LICENSE.txt
+
+Apache License 2.0 条款已随应用提供，可离线阅读。
+此页是主要直接运行时依赖清单，不是完整的传递依赖、打包 NOTICE 或发布法律审查报告。测试工具和 Gradle/Android 构建工具不是应用功能依赖。正式分发前应审查最终 APK 的全部传递依赖及声明。
+
+本应用源码仓库目前没有 LICENSE 文件，不能据此页推定应用本身使用 Apache License 2.0。
