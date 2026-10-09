@@ -27,6 +27,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.launch
 import com.example.lifemanager.domain.usecase.TodoOperationCoordinator
+import com.example.lifemanager.ui.common.testGenerationAccess
 import kotlinx.coroutines.asCoroutineDispatcher
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -45,6 +46,7 @@ class TodoViewModelTest {
                 repository = FakeTodoRepository(),
                 reminderScheduler = NoOpReminderScheduler,
                 dispatcher = dispatcher,
+                access = testGenerationAccess(),
             )
             viewModel = model
             advanceUntilIdle()
@@ -70,8 +72,10 @@ class TodoViewModelTest {
                 repository = repository,
                 reminderScheduler = NoOpReminderScheduler,
                 dispatcher = dispatcher,
+                access = testGenerationAccess(),
             )
             viewModel = model
+            advanceUntilIdle()
             model.openEditor()
             model.onTitleChanged("整理资料")
             model.saveTodo()
@@ -92,8 +96,9 @@ class TodoViewModelTest {
         Dispatchers.setMain(dispatcher)
         var viewModel: TodoViewModel? = null
         try {
-            val model = TodoViewModel(repository, NoOpReminderScheduler, dispatcher)
+            val model = TodoViewModel(repository, NoOpReminderScheduler, dispatcher, testGenerationAccess())
             viewModel = model
+            advanceUntilIdle()
             model.toggleTodo(repository.todos.value.single())
             advanceUntilIdle()
             assertTrue(repository.todos.value.single().isCompleted)
@@ -112,8 +117,9 @@ class TodoViewModelTest {
         Dispatchers.setMain(dispatcher)
         var viewModel: TodoViewModel? = null
         try {
-            val model = TodoViewModel(repository, NoOpReminderScheduler, dispatcher)
+            val model = TodoViewModel(repository, NoOpReminderScheduler, dispatcher, testGenerationAccess())
             viewModel = model
+            advanceUntilIdle()
             model.deleteTodo(8)
             advanceUntilIdle()
             assertFalse(repository.todos.value.any { it.id == 8L })
@@ -340,9 +346,12 @@ class TodoViewModelTest {
             override fun cancel(todoId: Long) = Unit
         }
         Dispatchers.setMain(main)
-        val model = TodoViewModel(repository, alarms, io)
+        val model = TodoViewModel(repository, alarms, io, testGenerationAccess())
         try {
-            runCurrent()
+            val initialDeadline = System.nanoTime() + 5_000_000_000L
+            do { runCurrent(); if (model.uiState.value.isAvailable) break; Thread.yield() }
+            while (System.nanoTime() < initialDeadline)
+            assertTrue(model.uiState.value.isAvailable)
             model.openEditor()
             model.onTitleChanged("提交中的草稿")
             model.onDueAtChanged(Instant.now().plusSeconds(3600))
@@ -358,7 +367,7 @@ class TodoViewModelTest {
             assertTrue(ioQueueReached.await(5, TimeUnit.SECONDS))
             assertFalse(alarmStarted.get(), "Main must consume the editor state before IO alarm side effects")
             val timeout = System.nanoTime() + 5_000_000_000L
-            do { runCurrent(); if (model.uiState.value.editor.editingId == 7L) break; Thread.sleep(10) }
+            do { runCurrent(); if (model.uiState.value.editor.editingId == 7L) break; Thread.yield() }
             while (System.nanoTime() < timeout)
             assertEquals(7L, model.uiState.value.editor.editingId)
             assertTrue(alarmStarted.get())
@@ -378,7 +387,7 @@ class TodoViewModelTest {
     ) {
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
-        val model = TodoViewModel(repository, scheduler, dispatcher)
+        val model = TodoViewModel(repository, scheduler, dispatcher, testGenerationAccess())
         try { advanceUntilIdle(); block(model) }
         finally { model.viewModelScope.cancel(); Dispatchers.resetMain() }
     }

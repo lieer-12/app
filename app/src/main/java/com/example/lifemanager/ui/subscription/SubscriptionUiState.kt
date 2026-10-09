@@ -1,11 +1,13 @@
 package com.example.lifemanager.ui.subscription
 
 import com.example.lifemanager.domain.model.*
+import com.example.lifemanager.domain.maintenance.DataGeneration
 import java.time.LocalDate
 
 enum class SubscriptionTab { LIST, STATS }
 
 data class SubscriptionEditorState(
+    val generation: DataGeneration? = null,
     val isOpen: Boolean = false,
     val sessionId: Long = 0,
     val original: Subscription? = null,
@@ -19,11 +21,13 @@ data class SubscriptionEditorState(
     val note: String = "",
     val reminderDays: Set<Int> = emptySet(),
     val isLoadingReminders: Boolean = false,
+    val preferencesError: String? = null,
     val isSaving: Boolean = false,
     val validationMessage: String? = null,
 )
 
 data class PaymentEditorState(
+    val generation: DataGeneration? = null,
     val isOpen: Boolean = false,
     val subscriptionId: Long = 0,
     val editingId: Long = 0,
@@ -36,6 +40,9 @@ data class PaymentEditorState(
 )
 
 data class SubscriptionUiState(
+    val generation: DataGeneration? = null,
+    val isAvailable: Boolean = false,
+    val isMaintaining: Boolean = false,
     val subscriptions: List<Subscription> = emptyList(),
     val payments: List<SubscriptionPayment> = emptyList(),
     val statistics: SubscriptionStats? = null,
@@ -51,9 +58,10 @@ data class SubscriptionUiState(
     val hasPaymentData: Boolean = false,
     val isBusy: Boolean = false,
     val isExportPending: Boolean = false,
+    val exportRequestId: Long? = null,
     val isExporting: Boolean = false,
     val exportMessage: String? = null,
 ) {
     val canExportCsv: Boolean
-        get() = hasSubscriptionData && hasPaymentData && !isLoading && !isExportPending && !isExporting
+        get() = isAvailable && !isMaintaining && hasSubscriptionData && hasPaymentData && !isLoading && !isExportPending && !isExporting
 }

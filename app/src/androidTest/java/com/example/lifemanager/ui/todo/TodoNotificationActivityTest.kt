@@ -2,6 +2,9 @@ package com.example.lifemanager.ui.todo
 
 import android.content.Intent
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -53,15 +56,22 @@ class TodoNotificationActivityTest {
     }
 
     private fun openDraft() {
-        compose.onNodeWithContentDescription("添加待办").performClick()
+        // Compose idleness does not await the finite Room query on the IO dispatcher.
+        compose.waitUntil(5000) {
+            compose.onAllNodes(hasContentDescription("添加待办") and isEnabled()).fetchSemanticsNodes().size == 1
+        }
+        compose.onNodeWithContentDescription("添加待办").assertIsEnabled().performClick()
         compose.onNodeWithText("标题").performTextInput("仅用于测试的未保存草稿")
     }
 
     private fun sendNotification(extra: String) {
         compose.runOnIdle {
             val activity = compose.activity
-            activity.startActivity(Intent(activity, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            // ActivityScenario matches lifecycle callbacks by launch-intent identity.
+            activity.startActivity(Intent(activity.intent)
+                .setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(com.example.lifemanager.notification.ReminderGeneration.EXTRA,
+                    requireNotNull(ViewModelProvider(activity)[TodoViewModel::class.java].uiState.value.generation).value)
                 .putExtra(extra, Long.MAX_VALUE))
         }
         compose.waitForIdle()

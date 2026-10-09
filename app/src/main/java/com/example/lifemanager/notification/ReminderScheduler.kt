@@ -8,22 +8,26 @@ import android.os.Build
 import android.net.Uri
 import java.time.Instant
 
-class ReminderScheduler(private val context: Context) : ReminderSchedulerContract {
+class ReminderScheduler(
+    private val context: Context,
+    private val stateProvider: () -> ReminderSchedulingState = { ReminderSchedulingState.fromApplication(context) },
+) : ReminderSchedulerContract {
     private val alarmManager = context.getSystemService(AlarmManager::class.java)
+    private val inventory = ReminderAlarmInventory(context, "todo")
 
-    override fun schedule(todoId: Long, title: String, dueAt: Instant) {
+    override suspend fun scheduleCurrent(todoId: Long, title: String, dueAt: Instant) {
         cancel(todoId)
+        val (generation, settings) = stateProvider().read()
+        if (!settings.todoReminders) {
+            ReminderNotifications(context).clearModule("todo")
+            return
+        }
         val now = System.currentTimeMillis()
         if (dueAt.toEpochMilli() <= now) return
         val triggerAt = maxOf(dueAt.minusSeconds(15 * 60).toEpochMilli(), now + 1_000)
-        val pendingIntent = pendingIntent(todoId, title, dueAt)
-        val canUseExact = Build.VERSION.SDK_INT < 31 || alarmManager.canScheduleExactAlarms()
-        if (canUseExact) {
-            try { alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent) }
-            catch (_: SecurityException) { alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent) }
-        } else {
-            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-        }
+        inventory.remember(todoId)
+        val pendingIntent = pendingIntent(todoId, title, dueAt, generation)
+        alarmManager.setReminder(triggerAt, pendingIntent)
     }
 
     override fun cancel(todoId: Long) {
@@ -37,14 +41,20 @@ class ReminderScheduler(private val context: Context) : ReminderSchedulerContrac
                 it.cancel()
             }
         }
+        inventory.forget(todoId)
     }
 
-    private fun pendingIntent(todoId: Long, title: String, dueAt: Instant): PendingIntent {
+    override fun cancelObsolete(currentIds: Set<Long>) {
+        (inventory.ids() - currentIds).forEach { cancel(it); ReminderNotifications(context).cancelTodo(it) }
+    }
+
+    private fun pendingIntent(todoId: Long, title: String, dueAt: Instant, generation: com.example.lifemanager.domain.maintenance.DataGeneration): PendingIntent {
         val intent = Intent(context, TodoReminderReceiver::class.java)
             .setData(Uri.parse("lifemanager://todo-reminder/$todoId"))
             .putExtra(TodoReminderReceiver.EXTRA_TODO_ID, todoId)
             .putExtra(TodoReminderReceiver.EXTRA_TITLE, title)
             .putExtra(TodoReminderReceiver.EXTRA_DUE_AT, dueAt.toEpochMilli())
+            .putExtra(ReminderGeneration.EXTRA, generation.value)
         return PendingIntent.getBroadcast(
             context,
             ReminderKey.forTodo(todoId),

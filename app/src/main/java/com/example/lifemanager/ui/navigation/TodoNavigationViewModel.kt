@@ -1,20 +1,23 @@
 package com.example.lifemanager.ui.navigation
 
-import androidx.lifecycle.ViewModel
-import java.util.concurrent.atomic.AtomicLong
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import com.example.lifemanager.di.IoDispatcher
+import com.example.lifemanager.domain.maintenance.DataGeneration
+import com.example.lifemanager.ui.common.GenerationAccess
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
 
-data class TodoNavigationRequest(val token: Long, val todoId: Long)
+data class TodoNavigationRequest(
+    override val token: Long,
+    val todoId: Long,
+    override val originalDataGeneration: DataGeneration,
+) : GenerationNavigationRequest {
+    override val entityId get() = todoId
+}
 
 /** Activity-scoped notification events survive rotation without replaying consumed Intents. */
-class TodoNavigationViewModel : ViewModel() {
-    private val nextToken = AtomicLong()
-    private val requests = MutableStateFlow<TodoNavigationRequest?>(null)
-    val pending = requests.asStateFlow()
-    fun open(todoId: Long) {
-        if (todoId > 0) requests.value = TodoNavigationRequest(nextToken.incrementAndGet(), todoId)
-    }
-    fun consume(token: Long) { requests.update { if (it?.token == token) null else it } }
-}
+@HiltViewModel
+class TodoNavigationViewModel @Inject constructor(
+    access: GenerationAccess,
+    @IoDispatcher dispatcher: CoroutineDispatcher,
+) : GenerationNavigationViewModel<TodoNavigationRequest>(access, dispatcher, ::TodoNavigationRequest)

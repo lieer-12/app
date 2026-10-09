@@ -53,30 +53,33 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lifemanager.domain.model.HabitFrequencyType
 import java.time.DayOfWeek
 import java.time.LocalDate
+import com.example.lifemanager.ui.settings.displayDate
 import java.time.YearMonth
 
 @Composable
 fun HabitScreen(viewModel: HabitViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val renderedGeneration = state.generation
+    val editorGeneration = state.editor.generation
     HabitContent(
         state = state,
         onTabSelected = viewModel::selectTab,
-        onOpenEditor = viewModel::openEditor,
-        onCloseEditor = viewModel::closeEditor,
-        onToggleToday = viewModel::toggleToday,
+        onOpenEditor = { viewModel.openEditor(it, renderedGeneration) },
+        onCloseEditor = { viewModel.closeEditor(editorGeneration) },
+        onToggleToday = { viewModel.toggleToday(it, renderedGeneration) },
         onSelectStatsHabit = viewModel::selectStatsHabit,
         onPreviousMonth = viewModel::previousMonth,
         onNextMonth = viewModel::nextMonth,
-        onNameChanged = viewModel::onNameChanged,
-        onIconChanged = viewModel::onIconChanged,
-        onColorChanged = viewModel::onColorChanged,
-        onFrequencyChanged = viewModel::onFrequencyChanged,
-        onFrequencyValueChanged = viewModel::onFrequencyValueChanged,
-        onCustomDayToggled = viewModel::onCustomDayToggled,
-        onStartDateChanged = viewModel::onStartDateChanged,
-        onNoteChanged = viewModel::onNoteChanged,
-        onSave = viewModel::saveHabit,
-        onDelete = viewModel::deleteHabit,
+        onNameChanged = { viewModel.onNameChanged(it, editorGeneration) },
+        onIconChanged = { viewModel.onIconChanged(it, editorGeneration) },
+        onColorChanged = { viewModel.onColorChanged(it, editorGeneration) },
+        onFrequencyChanged = { viewModel.onFrequencyChanged(it, editorGeneration) },
+        onFrequencyValueChanged = { viewModel.onFrequencyValueChanged(it, editorGeneration) },
+        onCustomDayToggled = { viewModel.onCustomDayToggled(it, editorGeneration) },
+        onStartDateChanged = { viewModel.onStartDateChanged(it, editorGeneration) },
+        onNoteChanged = { viewModel.onNoteChanged(it, editorGeneration) },
+        onSave = { viewModel.saveHabit(editorGeneration) },
+        onDelete = { viewModel.deleteHabit(it, editorGeneration) },
     )
 }
 
@@ -105,12 +108,13 @@ private fun HabitContent(
     Scaffold(
         topBar = { TopAppBar(title = { Text("打卡") }) },
         floatingActionButton = {
-            if (state.selectedTab == HabitTab.TASKS) {
-                FloatingActionButton(onClick = { onOpenEditor(null) }) { Text("新增") }
+            if (state.selectedTab == HabitTab.TASKS && state.isAvailable && !state.isMaintaining) {
+                FloatingActionButton(onClick = { onOpenEditor(null) }, modifier = Modifier.semantics { contentDescription = "添加习惯" }) { Text("新增") }
             }
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            if (state.isMaintaining) Text("正在维护数据，请稍后重试", modifier = Modifier.padding(16.dp))
             TabRow(selectedTabIndex = state.selectedTab.ordinal) {
                 HabitTab.entries.forEach { tab ->
                     Tab(
@@ -128,7 +132,7 @@ private fun HabitContent(
                 )
             }
             when (state.selectedTab) {
-                HabitTab.TASKS -> HabitTaskList(state.cards, onOpenEditor, onToggleToday)
+                HabitTab.TASKS -> HabitTaskList(state.cards, state.isAvailable && !state.isMaintaining, onOpenEditor, onToggleToday)
                 HabitTab.STATS -> HabitStats(
                     state = state,
                     onSelectHabit = onSelectStatsHabit,
@@ -141,6 +145,7 @@ private fun HabitContent(
     if (state.editor.isOpen) {
         HabitEditorDialog(
             editor = state.editor,
+            canWrite = state.isAvailable && !state.isMaintaining,
             onClose = onCloseEditor,
             onNameChanged = onNameChanged,
             onIconChanged = onIconChanged,
@@ -159,6 +164,7 @@ private fun HabitContent(
 @Composable
 private fun HabitTaskList(
     cards: List<HabitCard>,
+    canWrite: Boolean,
     onOpenEditor: (com.example.lifemanager.domain.model.Habit) -> Unit,
     onToggleToday: (Long) -> Unit,
 ) {
@@ -174,7 +180,7 @@ private fun HabitTaskList(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(cards, key = { it.habit.id }) { card ->
-            Card(onClick = { onOpenEditor(card.habit) }) {
+            Card(onClick = { onOpenEditor(card.habit) }, enabled = canWrite) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -193,7 +199,7 @@ private fun HabitTaskList(
                     }
                     Button(
                         onClick = { onToggleToday(card.habit.id) },
-                        enabled = card.canToggleToday,
+                        enabled = card.canToggleToday && canWrite,
                         modifier = Modifier.semantics {
                             contentDescription = if (card.completedToday) "撤销打卡：${card.habit.name}" else "打卡：${card.habit.name}"
                         },
@@ -295,11 +301,16 @@ private fun RowScope.CalendarDay(day: HabitCalendarDay) {
         day.isExpected -> MaterialTheme.colorScheme.secondaryContainer
         else -> Color.Transparent
     }
-    val label = "${day.date.year}年${day.date.monthValue}月${day.date.dayOfMonth}日，${if (day.isCompleted) "已打卡" else if (day.isExpected) "应打卡，未完成" else "非打卡日"}"
+    val foreground = when {
+        day.isCompleted -> MaterialTheme.colorScheme.onPrimary
+        day.isExpected -> MaterialTheme.colorScheme.onSecondaryContainer
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    val label = "${displayDate(day.date)}，${if (day.isCompleted) "已打卡" else if (day.isExpected) "应打卡，未完成" else "非打卡日"}"
     Box(
         modifier = Modifier.weight(1f).height(44.dp).padding(3.dp).background(background).semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
-    ) { Text(day.date.dayOfMonth.toString(), textAlign = TextAlign.Center) }
+    ) { Text(day.date.dayOfMonth.toString(), color = foreground, textAlign = TextAlign.Center) }
 }
 
 @Composable
@@ -311,10 +322,11 @@ private fun Heatmap(cells: List<HabitHeatmapCell>) {
                 cells.chunked(7).forEach { week ->
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         week.forEach { cell ->
+                            val accessibleDate = displayDate(cell.date)
                             val background = if (cell.count == 0) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary
                             Box(
                                 modifier = Modifier.size(12.dp).background(background).semantics {
-                                    contentDescription = "${cell.date}，${if (cell.count == 0) "无记录" else "1 次"}"
+                                    contentDescription = "$accessibleDate，${if (cell.count == 0) "无记录" else "1 次"}"
                                 },
                             )
                         }
@@ -330,6 +342,7 @@ private fun Heatmap(cells: List<HabitHeatmapCell>) {
 @Composable
 private fun HabitEditorDialog(
     editor: HabitEditorState,
+    canWrite: Boolean,
     onClose: () -> Unit,
     onNameChanged: (String) -> Unit,
     onIconChanged: (String) -> Unit,
@@ -376,16 +389,16 @@ private fun HabitEditorDialog(
                         }
                     }
                 }
-                item { OutlinedButton(onClick = { showDatePicker = true }) { Text("开始日期：${editor.startDate}") } }
+                item { OutlinedButton(onClick = { showDatePicker = true }) { Text("开始日期：${displayDate(editor.startDate)}") } }
                 item { OutlinedTextField(editor.note, onNoteChanged, label = { Text("备注（可选）") }, modifier = Modifier.fillMaxWidth()) }
                 editor.validationMessage?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
             }
         },
-        confirmButton = { Button(onClick = onSave, enabled = !editor.isSaving) { Text("保存") } },
+        confirmButton = { Button(onClick = onSave, enabled = canWrite && !editor.isSaving) { Text("保存") } },
         dismissButton = {
             Row {
-                if (editor.editingId != null) TextButton(onClick = { onDelete(editor.editingId) }) { Text("删除") }
-                TextButton(onClick = onClose) { Text("取消") }
+                if (editor.editingId != null) TextButton(onClick = { onDelete(editor.editingId) }, enabled = canWrite && !editor.isSaving) { Text("删除") }
+                TextButton(onClick = onClose, enabled = !editor.isSaving) { Text("取消") }
             }
         },
     )

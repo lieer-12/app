@@ -4,6 +4,9 @@ import android.content.Intent
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -55,15 +58,23 @@ class ScheduleNotificationActivityTest {
 
     private fun openDraft() {
         compose.onNode(hasText("日程") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).performClick()
-        compose.onNodeWithContentDescription("添加日程").performClick()
+        // Wait for Room-backed availability, not only the presence of a disabled FAB.
+        compose.waitUntil(5000) {
+            compose.onAllNodes(hasContentDescription("添加日程") and isEnabled()).fetchSemanticsNodes().size == 1
+        }
+        compose.onNodeWithContentDescription("添加日程").assertIsEnabled().performClick()
         compose.onNodeWithText("标题").performTextInput("仅用于测试的未保存日程草稿")
     }
 
     private fun sendNotification(extra: String) {
         compose.runOnIdle {
             val activity = compose.activity
-            activity.startActivity(Intent(activity, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            // ActivityScenario matches lifecycle callbacks by launch-intent identity.
+            // Preserve that identity while still delivering a real onNewIntent event.
+            activity.startActivity(Intent(activity.intent)
+                .setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(com.example.lifemanager.notification.ReminderGeneration.EXTRA,
+                    requireNotNull(ViewModelProvider(activity)[ScheduleViewModel::class.java].uiState.value.generation).value)
                 .putExtra(extra, Long.MAX_VALUE))
         }
         compose.waitForIdle()

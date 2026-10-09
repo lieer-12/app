@@ -2,16 +2,29 @@ package com.example.lifemanager.ui.todo
 
 import android.app.Application
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.example.lifemanager.ui.settings.LocalDateFormat
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.lifecycle.viewModelScope
 import com.example.lifemanager.domain.model.*
 import com.example.lifemanager.domain.repository.TodoRepository
@@ -21,10 +34,20 @@ import com.example.lifemanager.notification.ScheduleReminderSchedulerContract
 import com.example.lifemanager.ui.schedule.ScheduleViewModel
 import com.example.lifemanager.ui.theme.LifeManagerTheme
 import com.example.lifemanager.ui.navigation.NavGraph
-import com.example.lifemanager.ui.navigation.TodoNavigationRequest
+import com.example.lifemanager.ui.navigation.TodoNavigationViewModel
+import com.example.lifemanager.ui.settings.TestSettingsOwner
+import com.example.lifemanager.ui.common.testGenerationAccess
+import com.example.lifemanager.ui.common.GenerationAccess
+import com.example.lifemanager.ui.common.TestGenerations
+import com.example.lifemanager.domain.maintenance.MaintenanceCoordinator
+import com.example.lifemanager.domain.maintenance.MaintenanceState
 import java.time.Instant
 import java.util.TimeZone
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
@@ -43,26 +66,50 @@ class TodoScreenRegressionTest {
     @get:Rule val compose = createComposeRule()
     private lateinit var model: TodoViewModel
     private var scheduleModel: ScheduleViewModel? = null
+    private var settingsOwner: TestSettingsOwner? = null
+    private var navigationOwner: TodoNavigationViewModel? = null
     private val oldZone = TimeZone.getDefault()
     private val requestId = mutableStateOf<Long?>(null)
 
-    @After fun cleanup() { if (::model.isInitialized) model.viewModelScope.cancel(); scheduleModel?.viewModelScope?.cancel(); TimeZone.setDefault(oldZone) }
+    @After fun cleanup() { if (::model.isInitialized) model.viewModelScope.cancel(); scheduleModel?.viewModelScope?.cancel(); navigationOwner?.viewModelScope?.cancel(); settingsOwner?.close(); TimeZone.setDefault(oldZone) }
+
+    @Test fun maintenanceMarksAddTodoFabDisabledWhileKeepingAvailableSnapshot() {
+        val generations = TestGenerations(7)
+        val coordinator = MaintenanceCoordinator(generations)
+        val access = GenerationAccess(generations, coordinator)
+        val maintenanceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "维护期间保留的记录"))),
+            NoAlarms, Dispatchers.IO, access)
+        try {
+            show()
+            waitUntilAvailable()
+            compose.onNodeWithContentDescription("添加待办").assertIsEnabled()
+            maintenanceScope.launch { coordinator.withSession { awaitCancellation() } }
+            compose.waitUntil(5000) {
+                compose.waitForIdle()
+                coordinator.state.value == MaintenanceState.READY && model.uiState.value.isMaintaining
+            }
+            assertTrue(model.uiState.value.isAvailable)
+            compose.onNodeWithText("维护期间保留的记录").assertExists()
+            compose.onNodeWithContentDescription("添加待办").assertIsNotEnabled()
+        } finally { maintenanceScope.cancel() }
+    }
 
     @Test fun notificationOpensTargetHiddenBySearch() {
-        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "通知目标"))), NoAlarms, Dispatchers.IO)
+        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "通知目标"))), NoAlarms, Dispatchers.IO, testGenerationAccess())
         model.onFilterChanged(TodoFilter(dateFilter = TodoDateFilter.ALL, query = "不匹配"))
         show()
-        compose.waitUntil(5000) { !model.uiState.value.isLoading }
+        waitUntilAvailable()
         compose.runOnIdle { requestId.value = 42 }
         compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.editor.editingId == 42L }
         assertTrue(model.uiState.value.todos.isEmpty())
     }
 
     @Test fun notificationPreservesDraftThenOpensTargetAfterClose() {
-        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "通知目标"))), NoAlarms, Dispatchers.IO)
-        model.openEditor()
-        model.onTitleChanged("不要覆盖的草稿")
+        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "通知目标"))), NoAlarms, Dispatchers.IO, testGenerationAccess())
         show()
+        waitUntilAvailable()
+        compose.runOnIdle { model.openEditor(); model.onTitleChanged("不要覆盖的草稿") }
         compose.runOnIdle { requestId.value = 42 }
         compose.waitForIdle()
         assertEquals("不要覆盖的草稿", model.uiState.value.editor.title)
@@ -74,10 +121,11 @@ class TodoScreenRegressionTest {
         TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"))
         val dueAt = Instant.parse("2026-09-28T16:30:00Z") // September 29, 00:30 locally.
         val todo = Todo(id = 42, title = "凌晨任务", dueAt = dueAt)
-        model = TodoViewModel(ScreenRepository(listOf(todo)), NoAlarms, Dispatchers.IO)
-        model.openEditor(todo)
+        model = TodoViewModel(ScreenRepository(listOf(todo)), NoAlarms, Dispatchers.IO, testGenerationAccess())
         show()
-        compose.waitUntil(5000) { model.uiState.value.editor.editingId == 42L && !model.uiState.value.isLoading }
+        waitUntilAvailable()
+        compose.runOnIdle { model.openEditor(todo) }
+        compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.editor.editingId == 42L && !model.uiState.value.isLoading }
         compose.waitForIdle()
         compose.onNodeWithText("日期").performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.waitUntil(5000) { compose.onAllNodesWithText("确定").fetchSemanticsNodes().isNotEmpty() }
@@ -85,26 +133,102 @@ class TodoScreenRegressionTest {
         assertEquals(dueAt, model.uiState.value.editor.dueAt)
     }
 
+    @Test fun todoDeadlineDisplayUsesPreferenceWithoutChangingItsInstant() {
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"))
+        val due = Instant.parse("2026-10-01T23:30:00Z")
+        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "日期展示", dueAt = due))), NoAlarms, Dispatchers.IO, testGenerationAccess())
+        compose.setContent { LifeManagerTheme { CompositionLocalProvider(LocalDateFormat provides DateFormat.DMY) {
+            TodoScreen(viewModel = model, onOpenSettings = {})
+        } } }
+        waitUntilAvailable()
+        compose.runOnIdle { model.openEditor(Todo(id = 42, title = "日期展示", dueAt = due)) }
+        compose.onNodeWithText("02-10-2026 07:30").assertExists()
+        assertEquals(due, model.uiState.value.editor.dueAt)
+    }
+
     private fun show() { compose.setContent { LifeManagerTheme {
         TodoScreen(initialTodoId = requestId.value, onOpenSettings = {}, viewModel = model)
     } }; compose.waitForIdle() }
 
+    private fun waitUntilAvailable() {
+        compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.isAvailable }
+    }
+
+    // A decorative progress track must not hide the real completion ratio from TalkBack.
+    @Test fun summaryPublishesActualCompletionRatioAsAccessibleProgress() {
+        val now = Instant.now()
+        model = TodoViewModel(ScreenRepository(listOf(
+            Todo(id = 1, title = "已完成", isCompleted = true, completedAt = now, dueAt = now),
+            Todo(id = 2, title = "待完成", dueAt = now),
+        )), NoAlarms, Dispatchers.IO, testGenerationAccess())
+        show()
+        waitUntilAvailable()
+        compose.onNode(SemanticsMatcher.expectValue(
+            SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(0.5f, 0f..1f),
+        )).assertExists()
+        compose.onNodeWithText("已完成 1 项 · 待完成 1 项").assertExists()
+    }
+
+    // Search-empty must not claim the underlying database has no tasks, nor block recovery.
+    @Test fun searchEmptyStateDistinguishesFilteredResultsAndSearchStillRecovers() {
+        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "保留的记录"))),
+            NoAlarms, Dispatchers.IO, testGenerationAccess())
+        show()
+        waitUntilAvailable()
+        compose.runOnIdle { model.onFilterChanged(TodoFilter(dateFilter = TodoDateFilter.ALL, query = "不匹配")) }
+        compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.todos.isEmpty() }
+        // The compact Robolectric viewport intentionally exercises the scrollable empty item.
+        compose.onNodeWithText("没有符合条件的待办").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("搜索").performClick()
+        compose.onNode(hasSetTextAction()).performTextReplacement("")
+        compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.todos.size == 1 }
+        compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange))
+            .performScrollToNode(hasText("保留的记录"))
+        compose.onNodeWithText("保留的记录").assertIsDisplayed()
+    }
+
     @Test fun notificationReturningFromSettingsUsesRetainedTodoDraftOwner() {
-        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "通知目标"))), NoAlarms, Dispatchers.IO)
-        val request = mutableStateOf<TodoNavigationRequest?>(null)
-        val schedules = ScheduleViewModel(EmptySchedules(), NoScheduleAlarms, Dispatchers.IO)
+        val access = testGenerationAccess()
+        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "通知目标"))), NoAlarms, Dispatchers.IO, access)
+        val navigation = TodoNavigationViewModel(access, Dispatchers.IO).also { navigationOwner = it }
+        val schedules = ScheduleViewModel(EmptySchedules(), NoScheduleAlarms, Dispatchers.IO, access)
         scheduleModel = schedules
-        compose.setContent { LifeManagerTheme { NavGraph(todoViewModel = model, scheduleViewModel = schedules, todoRequest = request.value,
-            onTodoConsumed = { token -> if (request.value?.token == token) request.value = null }) } }
+        val settings = TestSettingsOwner().also { settingsOwner = it }
+        compose.setContent { LifeManagerTheme {
+            val request by navigation.pending.collectAsState()
+            NavGraph(todoViewModel = model, scheduleViewModel = schedules, settingsViewModel = settings.model,
+                todoRequest = request, todoNavigation = navigation, onTodoConsumed = navigation::consume)
+        } }
         compose.waitForIdle()
         compose.onNode(hasText("设置") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))
             .performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.waitUntil(5000) { compose.onAllNodesWithText("已完成模块").fetchSemanticsNodes().isNotEmpty() }
+        waitUntilAvailable()
         // Represents the retained Todo owner while another destination is visible.
-        compose.runOnIdle { model.openEditor(); model.onTitleChanged("跨模块保留的草稿"); request.value = TodoNavigationRequest(1, 42) }
+        compose.runOnIdle { model.openEditor(); model.onTitleChanged("跨模块保留的草稿"); navigation.open(42) }
         compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.editor.pendingNotificationId == 42L }
         assertEquals("跨模块保留的草稿", model.uiState.value.editor.title)
         compose.onNodeWithText("跨模块保留的草稿").assertExists()
+    }
+
+    @Test fun coldStartWithNotificationWaitsForTheGraphThenOpensTheTarget() {
+        val access = testGenerationAccess()
+        model = TodoViewModel(ScreenRepository(listOf(Todo(id = 42, title = "冷启动目标"))), NoAlarms, Dispatchers.IO, access)
+        val navigation = TodoNavigationViewModel(access, Dispatchers.IO).also { navigationOwner = it }
+        val schedules = ScheduleViewModel(EmptySchedules(), NoScheduleAlarms, Dispatchers.IO, access)
+        scheduleModel = schedules
+        val settings = TestSettingsOwner().also { settingsOwner = it }
+        var consumed = false
+        navigation.open(42)
+        compose.setContent { LifeManagerTheme {
+            val request by navigation.pending.collectAsState()
+            NavGraph(todoViewModel = model, scheduleViewModel = schedules, settingsViewModel = settings.model,
+                todoRequest = request, todoNavigation = navigation,
+                onTodoConsumed = { navigation.consume(it); consumed = true })
+        } }
+        compose.waitUntil(5000) { compose.waitForIdle(); model.uiState.value.editor.editingId == 42L }
+        compose.onNode(hasText("冷启动目标") and hasSetTextAction()).assertExists()
+        assertTrue(consumed)
     }
 
     private object NoAlarms : ReminderSchedulerContract {

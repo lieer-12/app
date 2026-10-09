@@ -10,6 +10,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
+import com.example.lifemanager.domain.maintenance.DataGeneration
 import androidx.core.content.ContextCompat
 import com.example.lifemanager.MainActivity
 import com.example.lifemanager.domain.model.Subscription
@@ -18,7 +20,7 @@ import java.time.LocalDate
 object SubscriptionNotificationHelper {
     const val CHANNEL_ID = "subscription_reminders"
 
-    fun showReminder(context: Context, subscription: Subscription, daysBefore: Int, dueDate: LocalDate) {
+    fun showReminder(context: Context, subscription: Subscription, daysBefore: Int, dueDate: LocalDate, generation: DataGeneration) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
@@ -30,8 +32,9 @@ object SubscriptionNotificationHelper {
             Intent(context, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 .setData(Uri.parse(ReminderKey.subscriptionData(subscription.id, daysBefore, dueDate)))
-                .putExtra(MainActivity.EXTRA_SUBSCRIPTION_ID, subscription.id),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                .putExtra(MainActivity.EXTRA_SUBSCRIPTION_ID, subscription.id)
+                .putExtra(ReminderGeneration.EXTRA, generation.value),
+            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -39,9 +42,17 @@ object SubscriptionNotificationHelper {
             .setContentText("${subscription.appName} 将于 $dueDate 扣费（提前 $daysBefore 天）")
             .setContentIntent(openIntent)
             .setAutoCancel(true)
+            .addExtras(Bundle().apply {
+                putLong(ReminderGeneration.EXTRA, generation.value)
+                putString(ReminderNotifications.MODULE, "subscription")
+            })
             .build()
         // Notification tags, like alarm data, preserve the full ID and isolate other modules.
-        manager.notify(notificationTag(subscription.id, daysBefore), 0, notification)
+        try {
+            manager.notify(notificationTag(subscription.id, daysBefore), 0, notification)
+        } catch (_: SecurityException) {
+            // Revocation between the permission check and notify is a normal no-delivery outcome.
+        }
     }
 
     fun cancelAll(context: Context, subscriptionId: Long) {

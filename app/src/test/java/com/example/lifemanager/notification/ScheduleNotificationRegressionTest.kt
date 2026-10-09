@@ -22,7 +22,7 @@ class ScheduleNotificationRegressionTest {
         val legacy = PendingIntent.getActivity(context, ReminderKey.forSchedule(42),
             Intent(context, MainActivity::class.java).putExtra("schedule_id", 42L),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        NotificationHelper.showScheduleReminder(context, 42, "会议")
+        NotificationHelper.showScheduleReminder(context, 42, "会议", com.example.lifemanager.domain.maintenance.DataGeneration(37))
         val notification = shadowOf(context.getSystemService(NotificationManager::class.java)).allNotifications.single()
         val intent = shadowOf(notification.contentIntent).savedIntent
         assertEquals(42L, intent.getLongExtra("schedule_id", 0))

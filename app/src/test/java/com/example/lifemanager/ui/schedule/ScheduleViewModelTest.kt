@@ -3,6 +3,7 @@ package com.example.lifemanager.ui.schedule
 import com.example.lifemanager.domain.model.Schedule
 import com.example.lifemanager.domain.repository.ScheduleRepository
 import com.example.lifemanager.notification.ScheduleReminderSchedulerContract
+import com.example.lifemanager.ui.common.testGenerationAccess
 import androidx.lifecycle.viewModelScope
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +26,7 @@ class ScheduleViewModelTest {
         Dispatchers.setMain(dispatcher)
         var viewModel: ScheduleViewModel? = null
         try {
-            val model = ScheduleViewModel(FakeScheduleRepository(), NoOpScheduleReminderScheduler, dispatcher)
+            val model = ScheduleViewModel(FakeScheduleRepository(), NoOpScheduleReminderScheduler, dispatcher, testGenerationAccess())
             viewModel = model
             advanceUntilIdle()
             model.openEditor()
@@ -49,7 +50,7 @@ class ScheduleViewModelTest {
         Dispatchers.setMain(dispatcher)
         var viewModel: ScheduleViewModel? = null
         try {
-            val model = ScheduleViewModel(repository, NoOpScheduleReminderScheduler, dispatcher)
+            val model = ScheduleViewModel(repository, NoOpScheduleReminderScheduler, dispatcher, testGenerationAccess())
             viewModel = model
             advanceUntilIdle()
             model.openEditor()

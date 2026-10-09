@@ -21,12 +21,12 @@ import kotlin.test.assertTrue
 class TodoReminderRegressionTest {
     private val context get() = RuntimeEnvironment.getApplication()
 
-    @Test fun changingFutureDeadlineToPastCancelsExistingAlarm() {
-        val scheduler = ReminderScheduler(context)
-        scheduler.schedule(42, "待办", Instant.now().plusSeconds(3600))
+    @Test fun changingFutureDeadlineToPastCancelsExistingAlarm() = kotlinx.coroutines.test.runTest {
+        val scheduler = ReminderScheduler(context) { ReminderAdmissionFixture().scheduling }
+        scheduler.scheduleCurrent(42, "待办", Instant.now().plusSeconds(3600))
         val alarms = shadowOf(context.getSystemService(AlarmManager::class.java))
         assertEquals(1, alarms.scheduledAlarms.size)
-        scheduler.schedule(42, "待办", Instant.now().minusSeconds(1))
+        scheduler.scheduleCurrent(42, "待办", Instant.now().minusSeconds(1))
         assertTrue(alarms.scheduledAlarms.isEmpty())
     }
 
@@ -38,7 +38,7 @@ class TodoReminderRegressionTest {
     }
 
     @Test fun notificationClickReusesActivitySoDraftViewModelIsPreserved() {
-        NotificationHelper.showTodoReminder(context, 42, "待办")
+        NotificationHelper.showTodoReminder(context, 42, "待办", com.example.lifemanager.domain.maintenance.DataGeneration(37))
         val notification = shadowOf(context.getSystemService(NotificationManager::class.java)).allNotifications.single()
         val intent = shadowOf(notification.contentIntent).savedIntent
         assertTrue(intent.flags and Intent.FLAG_ACTIVITY_SINGLE_TOP != 0)
@@ -50,7 +50,7 @@ class TodoReminderRegressionTest {
         val legacy = PendingIntent.getActivity(context, ReminderKey.forTodo(42),
             Intent(context, MainActivity::class.java).putExtra("todo_id", 42L),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        NotificationHelper.showTodoReminder(context, 42, "新标题")
+        NotificationHelper.showTodoReminder(context, 42, "新标题", com.example.lifemanager.domain.maintenance.DataGeneration(37))
         val notification = shadowOf(context.getSystemService(NotificationManager::class.java)).allNotifications.single()
         val intent = shadowOf(notification.contentIntent).savedIntent
         assertTrue(intent.flags and Intent.FLAG_ACTIVITY_SINGLE_TOP != 0)
@@ -58,13 +58,13 @@ class TodoReminderRegressionTest {
         assertTrue(shadowOf(legacy).isCanceled)
     }
 
-    @Test fun upgradedSchedulerCancelsLegacyBroadcastAlarm() {
+    @Test fun upgradedSchedulerCancelsLegacyBroadcastAlarm() = kotlinx.coroutines.test.runTest {
         val legacy = PendingIntent.getBroadcast(context, ReminderKey.forTodo(42),
             Intent(context, TodoReminderReceiver::class.java).putExtra("todo_id", 42L),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val manager = context.getSystemService(AlarmManager::class.java)
         manager.setExact(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 3600000, legacy)
-        ReminderScheduler(context).schedule(42, "待办", Instant.now().minusSeconds(1))
+        ReminderScheduler(context) { ReminderAdmissionFixture().scheduling }.scheduleCurrent(42, "待办", Instant.now().minusSeconds(1))
         assertTrue(shadowOf(manager).scheduledAlarms.isEmpty())
         assertTrue(shadowOf(legacy).isCanceled)
     }

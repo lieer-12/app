@@ -20,6 +20,11 @@ import com.example.lifemanager.data.local.dao.SubscriptionDao
 import com.example.lifemanager.data.local.entity.SubscriptionEntity
 import com.example.lifemanager.data.local.entity.SubscriptionPaymentEntity
 import com.example.lifemanager.data.local.entity.SubscriptionReminderEntity
+import com.example.lifemanager.data.local.entity.AppSettingsEntity
+import com.example.lifemanager.data.local.entity.MaintenanceEntity
+import com.example.lifemanager.data.local.dao.SettingsDao
+import com.example.lifemanager.data.local.dao.BackupSnapshotDao
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -33,8 +38,10 @@ import com.example.lifemanager.data.local.entity.SubscriptionReminderEntity
         SubscriptionEntity::class,
         SubscriptionPaymentEntity::class,
         SubscriptionReminderEntity::class,
+        AppSettingsEntity::class,
+        MaintenanceEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -45,8 +52,19 @@ abstract class LifeManagerDatabase : RoomDatabase() {
     abstract fun scheduleDao(): ScheduleDao
     abstract fun habitDao(): HabitDao
     abstract fun subscriptionDao(): SubscriptionDao
+    abstract fun settingsDao(): SettingsDao
+    abstract fun backupSnapshotDao(): BackupSnapshotDao
 
     companion object {
+        val INITIALIZE = object : Callback() {
+            override fun onCreate(db: SupportSQLiteDatabase) { initializeDefaults(db) }
+        }
+
+        private fun initializeDefaults(db: SupportSQLiteDatabase) {
+            db.execSQL("INSERT OR IGNORE INTO app_settings (id, theme, dateFormat, defaultCurrency, todoReminders, scheduleReminders, subscriptionReminders, defaultReminderMask) VALUES (1, 'SYSTEM', 'YMD', 'CNY', 1, 1, 1, 0)")
+            db.execSQL("INSERT OR IGNORE INTO app_maintenance (id, generation) VALUES (1, 0)")
+        }
+
         val MIGRATIONS: Array<Migration> = arrayOf(
             object : Migration(1, 2) {
                 override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
@@ -129,6 +147,13 @@ abstract class LifeManagerDatabase : RoomDatabase() {
                     db.execSQL("CREATE INDEX IF NOT EXISTS index_subscription_payments_subscriptionId ON subscription_payments (subscriptionId)")
                     db.execSQL("CREATE TABLE IF NOT EXISTS subscription_reminders (subscriptionId INTEGER NOT NULL, daysBefore INTEGER NOT NULL, PRIMARY KEY(subscriptionId, daysBefore), FOREIGN KEY(subscriptionId) REFERENCES subscriptions(id) ON DELETE CASCADE)")
                     db.execSQL("CREATE INDEX IF NOT EXISTS index_subscription_reminders_subscriptionId ON subscription_reminders (subscriptionId)")
+                }
+            },
+            object : Migration(4, 5) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("CREATE TABLE IF NOT EXISTS app_settings (id INTEGER NOT NULL, theme TEXT NOT NULL, dateFormat TEXT NOT NULL, defaultCurrency TEXT NOT NULL, todoReminders INTEGER NOT NULL, scheduleReminders INTEGER NOT NULL, subscriptionReminders INTEGER NOT NULL, defaultReminderMask INTEGER NOT NULL, PRIMARY KEY(id))")
+                    db.execSQL("CREATE TABLE IF NOT EXISTS app_maintenance (id INTEGER NOT NULL, generation INTEGER NOT NULL, PRIMARY KEY(id))")
+                    initializeDefaults(db)
                 }
             },
         )

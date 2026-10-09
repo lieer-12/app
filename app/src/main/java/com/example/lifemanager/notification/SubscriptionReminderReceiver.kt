@@ -3,27 +3,35 @@ package com.example.lifemanager.notification
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import com.example.lifemanager.domain.repository.SubscriptionRepository
 import com.example.lifemanager.domain.usecase.SubscriptionOperationCoordinator
-import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import java.time.DateTimeException
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import javax.inject.Inject
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
 
-@AndroidEntryPoint
-class SubscriptionReminderReceiver : BroadcastReceiver() {
-    @Inject lateinit var repository: SubscriptionRepository
-    @Inject lateinit var scheduler: SubscriptionReminderSchedulerContract
-
+class SubscriptionReminderReceiver(
+    private val repositoryProvider: (Context) -> SubscriptionRepository = {
+        EntryPointAccessors.fromApplication(it.applicationContext, SubscriptionReminderEntryPoint::class.java)
+            .subscriptionRepository()
+    },
+    private val schedulerProvider: (Context) -> SubscriptionReminderSchedulerContract = {
+        EntryPointAccessors.fromApplication(it.applicationContext, SubscriptionReminderEntryPoint::class.java)
+            .subscriptionReminderScheduler()
+    },
+    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val runnerProvider: (Context) -> ReminderBroadcastRunner = {
+        ReminderBroadcastRunner.fromApplication(it, dispatcher)
+    },
+    private val onBusy: (Context) -> Unit = { ReminderReconciliationWorker.enqueueImmediate(it) },
+    private val settingsProvider: (Context) -> com.example.lifemanager.domain.repository.SettingsRepository = ::reminderSettings,
+) : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val subscriptionId = intent.getLongExtra(EXTRA_SUBSCRIPTION_ID, 0L)
         val daysBefore = intent.getIntExtra(EXTRA_DAYS_BEFORE, 0)
@@ -37,30 +45,39 @@ class SubscriptionReminderReceiver : BroadcastReceiver() {
         ) return
 
         val pendingResult = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
+        val generation = ReminderGeneration.read(intent)
+        // A PendingIntent can survive consumption of its one-shot alarm. This is only a matching
+        // operational receipt, not permission to post or mutate Room while maintenance is frozen.
+        if (generation != null) {
+            try { SubscriptionReminderScheduler.recordArrival(context, subscriptionId, daysBefore, dueDate, generation) }
+            catch (_: Exception) { /* Admission still decides whether delivery is allowed. */ }
+        }
+        startReminderBroadcast(context, runnerProvider, { pendingResult?.finish() }, onBusy, generation) {
             try {
-                withTimeout(8_000) {
-                    SubscriptionOperationCoordinator.run {
-                        val subscription = repository.getSubscription(subscriptionId)
-                        val selectedDays = repository.getReminderDays(subscriptionId)
-                        // Keep the snapshot, scheduling and posting protected from UI mutations.
-                        SubscriptionReminderDelivery.reconcile(
-                            subscriptionId, subscription, selectedDays, daysBefore, dueDate,
-                            Instant.now(), ZoneId.systemDefault(), scheduler,
-                        ) { current ->
-                            SubscriptionNotificationHelper.showReminder(context, current, daysBefore, dueDate)
+                SubscriptionOperationCoordinator.run {
+                    if (SubscriptionReminderScheduler.wasDelivered(context, subscriptionId, daysBefore, dueDate,
+                            requireNotNull(generation))) return@run
+                    if (!settingsProvider(context).getSettings().subscriptionReminders) {
+                        schedulerProvider(context).cancelAll(subscriptionId)
+                        return@run
+                    }
+                    val repository = repositoryProvider(context)
+                    val subscription = repository.getSubscription(subscriptionId)
+                    val selectedDays = repository.getReminderDays(subscriptionId)
+                    // Global admission encloses the module lock, reads, alarm changes and posting.
+                    SubscriptionReminderDelivery.reconcile(
+                        subscriptionId, subscription, selectedDays, daysBefore, dueDate,
+                        Instant.now(), ZoneId.systemDefault(), schedulerProvider(context),
+                    ) { current ->
+                        if (settingsProvider(context).getSettings().subscriptionReminders) {
+                            SubscriptionNotificationHelper.showReminder(context, current, daysBefore, dueDate, requireNotNull(generation))
+                            SubscriptionReminderScheduler.recordDelivery(context, subscriptionId, daysBefore, dueDate, generation)
                         }
                     }
                 }
-            } catch (error: TimeoutCancellationException) {
-                Log.w(TAG, "Subscription reminder timed out; daily reconciliation will retry", error)
-            } catch (error: CancellationException) {
-                throw error
             } catch (error: Exception) {
-                // Room, alarm service and notification permission failures must not crash a background receiver.
-                Log.w(TAG, "Unable to deliver subscription reminder", error)
-            } finally {
-                pendingResult.finish()
+                try { onBusy(context.applicationContext) } catch (queueError: Exception) { error.addSuppressed(queueError) }
+                throw error
             }
         }
     }
@@ -69,6 +86,12 @@ class SubscriptionReminderReceiver : BroadcastReceiver() {
         const val EXTRA_SUBSCRIPTION_ID = "subscription_id"
         const val EXTRA_DAYS_BEFORE = "subscription_days_before"
         const val EXTRA_DUE_DATE = "subscription_due_date"
-        private const val TAG = "SubscriptionReminder"
     }
+}
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface SubscriptionReminderEntryPoint {
+    fun subscriptionRepository(): SubscriptionRepository
+    fun subscriptionReminderScheduler(): SubscriptionReminderSchedulerContract
 }

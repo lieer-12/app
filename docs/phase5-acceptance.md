@@ -1,0 +1,703 @@
+# Phase 5 验收记录（功能通过，性能尚未全部验收）
+
+更新日期：2026-10-05。范围依据已确认的
+`superpowers/specs/2026-10-02-phase5-settings-backup-design.md`。
+已确认功能的源码和 API 35 回归通过；稳定 60 fps / 真机等未验收项明确保留。
+不是全需求或正式发布完成证明。用户已选择继续性能专项，达标后再推送并开始 UI；
+当前未推送本批、未开始卡通 UI。
+
+## 第九批：顶层导航与维护冻结终验（2026-10-05）
+
+承接第八批，用户批准有界顶层保存 / 恢复栈，保留草稿和子页；非根模块返回待办，
+不重放 Tab 历史。Tab、设置入口与合格通知共享导航策略，20 轮 JVM 循环验证所有者
+复用及最后释放；真实 Activity 覆盖配置重建、通知离开后草稿、维护冻结与解锁。
+
+独立审查推动补齐系统返回、顶部设置入口及备份确认期通知绕过路径。系统返回拦截
+必须位于 destination 生命周期内，不能依赖 Scaffold 外的源码先后顺序；备份 busy
+仍由设置取消处理器负责。三类通知遇到备份锁保留原事件，解除锁后用原世代重新准入。
+只有实时 UI 门禁拒绝可以等待 / 重试，等待在数据许可释放之后，过期 / 被替代 /
+读取失败请求不复活。确定性交错测试证明不用第二次 delivery 调用也能重试，且等待时
+真实维护会话仍可进入。没有生产测试钩子、未实现脚手架、空页面或样例业务数据。
+
+最终六任务（JVM、debug、androidTest、lint、设备、release）`BUILD SUCCESSFUL`，
+**3 分 1 秒**；按本次 XML / lint / APK 实际核对，而非预期计数：
+
+- JVM **658 项 / 67 套件**，设备 **52 项 / 22 套件**（54.880 秒），均 0 failure / error / skipped。
+- 本批比第八批增加 4 项 JVM、11 项设备行为回归；原缺陷和两个门禁交错均已运行 RED，
+  修正后 GREEN；无设备 / 离线设备和错误 Tab 定位不计为产品 RED。
+- lint **0 error / 57 warning**，不 suppress 既有提示。debug 18,990,037 字节，
+  androidTest 1,280,401 字节，unsigned release 12,232,272 字节，用户 APK <30 MB。
+- 独立限域复审未发现剩余 P1 / P2；许可、取消传播、丢失唤醒和全部三条通知接线已核对。
+- Room schema v5、JSON v1、十表 75 字段、原需求 / Manifest / Gradle / 依赖不变，
+  不 destructive migration、不清应用数据、不覆盖用户 AVD 或保存快照。
+
+性能数据单独记录在 [性能测量](phase5-performance.md)：重新启动同参数只读会话并
+停止 Gradle 后，八轮前后 / 反向检查，新包冷启动 545–625 ms，但卡顿率 2.27–10.85%，
+四轮汇总 139 / 3098（4.49%）；旧包四轮 86 / 3135（2.74%）。保留尖峰，不能宣称
+帧率改善或稳定 60 fps。功能全量通过不是性能通过。先前 654 / 41 与 16.2% 是历史
+基线，不替代本批测量。按用户选择，
+性能验收前不提交为完成阶段、不推送、不开始 UI；真机问题已询问，当前只连接 owned
+只读模拟器。README 与实施计划同步，本节是最新功能结果，后文保留各批历史证据。
+
+最终非调试包另录 30 秒时间线（17,839,400 字节，无追踪丢失 / error）：重组平均
+0.280 ms、布局 0.974 ms，绘制交接 / RenderThread 缓冲等待约 18–24 ms；录制期
+卡顿 45.58%，不与未追踪采样直接比较，不能断言唯一起因。真机验收仍未进行，
+不删除动画或缩小分辨率来伪造达标。详见性能报告，不能将本节称为 Phase 5 全部完成。
+
+最终源码命令（本机 ignored init 仅提供测试 JVM 首次下载代理）：
+
+```powershell
+$env:JAVA_HOME='D:\jdk'
+$env:ANDROID_SERIAL='emulator-5556'
+.\.tools\gradle-9.4.1\bin\gradle.bat -I .tools/phase5-test-network.gradle `
+  :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest `
+  :app:lintDebug :app:connectedDebugAndroidTest :app:assembleRelease --console=plain
+```
+
+缓存已具备时可以去掉 `-I`；必须使用独立测试模拟器，Gradle 仪器任务会卸载测试应用，
+不能把该命令指向装有个人业务数据的手机或用户原会话。
+
+## 第八批功能终验（2026-10-05）
+
+已接线保护备份 / 独立最终确认 / 单事务恢复和业务清空、Activity 级备份状态机与系统
+OpenDocument / CreateDocument、启动临时文件清理、三类提醒偏好、源头载荷世代、
+日程投递资格、权限状态刷新、真实版本和离线许可证，以及关键大字体 / 点击语义。
+JSON v1、Room schema v5、十表 75 字段不变，无 destructive migration。
+
+### 最终源码验证
+
+- 修正最后并发投递问题后完整五任务 `BUILD SUCCESSFUL`，2 分 32 秒：652 JVM，
+  debug / test APK，lint 和 41 项 API 35 设备测试通过。新增两个复审验证条件后只改测试，
+  再全量 JVM / lint `BUILD SUCCESSFUL`，2 分 7 秒：**654 项 / 66 套件**，0 failure / error / skipped。
+- 设备 **41 项 / 21 套件**，0 failure / error / skipped，52.813 秒。没有把编译测试 APK
+  当作设备通过，也没有把真实系统选择器取消测试当作用户文件恢复全时序验收。
+- 最终 lint **0 error / 57 warning**。保留依赖更新、UseKtx、SDK、KAPT、缺图标等提示；
+  不 suppress、不升级整套依赖隐藏提示，需单独发布适配。
+- debug APK 18,984,755 字节，约 18.11 MiB；test APK 1,280,401 字节；源码 schema v5
+  不变，原需求、Manifest、Gradle / 依赖未改。`git diff --check` 通过。
+- 独立审查确认无剩余 P1 / P2，核对 654 / 41 XML 后解除条件批准；两个新增条件覆盖
+  投递标记不会压制 G+1 同 ID/date，以及标记后取消仍重建未来提醒、无第二次通知。
+- 非调试构建额外成功（4 分 8 秒）。仅在本机用调试证书签名安装并核对非 DEBUGGABLE，
+  不提交证书 / APK、不改变发布配置。五次冷启动 1.238–1.390 秒，模拟器 <2 秒目标通过。
+- 切页 716 帧中 116 帧 janky（16.2%），P95 48 ms；**稳定 60 fps 未证明**，并非全部性能
+  验收通过。具体方法、此前失败和限制见 [性能测量](phase5-performance.md)。
+
+### 已完成的功能和安全边界
+
+- 持久化主题 / 日期 / 新建订阅偏好、三类提醒开关；权限拒绝不阻止离线 CRUD，前台真实刷新。
+- 全量 JSON 导出 / 输入校验 / 真实预览、经重读验证的保护备份和独立最终确认。
+- 一次 Room 事务完整替换十表全部字段和设置、推进本机世代；清空业务保留设置，失败回滚。
+- 取消冻结保留原数据和草稿，提交后失效旧操作；提交后取消 / 提醒失败明确区分已变更数据。
+- 源头广播 / 点击世代、当前 Room 资格、读取和重排故障恢复、并发投递去重、所有维护出口校准。
+- 启动只清专属临时残片，新进程不重放；真实版本及主要直接依赖的离线许可证。
+- 设置 / 对话框关键深浅色、200% 字体、至少 48 dp 和图标语义测试；完整 TalkBack 人工审计待验收。
+
+### 未完成与已知限制
+
+- 稳定 60 fps、真机 / release 发布采样、大数据滚动和全屏幕适配仍待专项，不等于全性能已达标。
+- 真实用户备份全 UI 恢复、云 provider、磁盘耗尽、在提交瞬间强杀进程、厂商通知 / 省电策略
+  全时序尚无设备验收；本批用独立合成 Room / 下载文档，不动真实用户库。
+- 不识别不同 URI 指向同一底层文件的通用别名；建议另存新文件。明文 JSON 不加密、不认证，
+  外部 provider 阻塞不保证即时取消，64 MiB 不是峰值内存限制。
+- Room / AlarmManager / NotificationManager 不属于一个事务；进程恰在通知和操作标记之间
+  死亡不承诺全平台 exactly-once。世代保证不作用于替换后的旧数据，启动 / Worker 重新校准。
+- 旧阶段缺口（习惯提醒 / 暂停 / 归档、完整重复日程策略、部分高级统计）、国际化、后台
+  遮罩、完整依赖 / NOTICE 审计、签名 / R8 / SDK 发布适配 / Wrapper 均未默默扩大范围。
+- 按用户选择继续性能专项，达标后再常规分支提交 / 推送并开始 UI；不自动
+  合并 main、不 force push、不关闭 TLS、不把该功能验收称为所有需求已完成。
+
+### 可复现命令
+
+```powershell
+$env:JAVA_HOME='D:\jdk'
+$env:ANDROID_SERIAL='emulator-5556'
+.\.tools\gradle-9.4.1\bin\gradle.bat :app:testDebugUnitTest :app:assembleDebug `
+  :app:assembleDebugAndroidTest :app:lintDebug :app:connectedDebugAndroidTest --console=plain
+# 最后两项只新增测试后，全量再验证：
+.\.tools\gradle-9.4.1\bin\gradle.bat :app:testDebugUnitTest :app:lintDebug --console=plain
+git diff --check
+```
+
+本机首次 Robolectric 下载用 ignored init 脚本为测试 JVM 提供 SOCKS 7897；
+缓存 Android 28 / 31 / 33 后不需要它。没有提交个人代理配置。
+
+### 本批中间证据（不替代上文最终验证）
+
+- 修正后全量 JVM 649 项 / 66 套件，0 failure / error / skipped，debug/test APK 构建通过。
+- 同轮 lint 0 error / 56 warning；依赖更新检查会受缓存 / 联网状态影响，不隐藏已有 SDK、
+  版本提示、KAPT 和缺图标警告，不声称较旧的 28 条报告证明新代码零告警。
+- 真实系统两种文件选择器取消设备回归通过；深色、200% 字体和可滚动离线许可阅读通过。
+- 独立复审仍在核对故障恢复出口；完整设备回归、性能测量、最终源码全量重跑和远端核对
+  尚未全部完成。此进度不作为 Phase 5 完成或 UI 启动依据。
+
+### 本批真实失败与修正记录
+
+- 初轮扩大全量曾有两项假 Activity 导航宿主缺 Hilt EntryPoint；将生产备份 ViewModel
+  移为 MainActivity 级拥有者传给导航，原业务回归全量通过；不是删除测试或禁用生产备份。
+- 两项真实文件选择器取消装置未推进 Compose 帧，UI 在测试退出后才启动；等待期间
+  调用 `waitForIdle` 后实际系统入口与取消通过，不用固定 sleep 代替观察。
+- 200% 字体文本布局报告 paragraph 宽度与 wrap-content Text 尺寸不一致；全宽按钮文本
+  改为全宽居中布局后原不溢出断言通过，没有缩小字体、跳过或弱化断言。
+- 独立审查复现维护期间到点后取消可能漏通知、已提交后的取消错误呈现，补覆盖原世代
+  发生提示、当前 Room 重试和已提交结果状态。
+- 后续四项故障测试实际 RED（17 秒，4/4 失败）：订阅失败重排选择未来周期、日程失败
+  重排无闹钟、已准入读取失败抹掉提示、工作流返回后 Main 发布取消报告“已取消”。修正
+  后与三项原准入回归一起 GREEN（7 项，2 分 1 秒）；再全量 649 GREEN。
+- 一次扩大定向装置发生协程超时，已记录线程堆栈并仅终止本次 Gradle CLI / 测试 Worker；
+  不记为 GREEN。单独故障场景与后续全量重新执行通过，不跳过失败项。
+- 后续两个订阅读取 / 取消出口经 2/2 行为 RED 后修正：保持当前发生提示直到投递完成，
+  读取失败 / 超时请求当前数据重试；定向 19 项通过，随后完整 651 JVM / 41 设备通过。
+- 最后并发复审复现临时重排广播在最终设置读取暂停期间再次到达：真实 NotificationManager
+  边界计数期望 1、实际 2。匹配原世代和发生日期的投递标记在模块锁内记录 / 校验后，
+  原交错测试及集成 / 准入 / 续排共 20 项通过（1 分 49 秒），最终全量重新运行。
+- 原只读隐藏 AVD 实际使用 SwiftShader 软件渲染，启动测量不满足目标；已明确记录失败，
+  不推断为代码优化成果。独立会话改用 `-gpu host` 后 SurfaceFlinger 证实 NVIDIA RTX 4050；
+  没有修改用户 AVD 配置 / 数据 / 快照，最终设备与性能在该配置重测。
+
+## 历史分批记录（截至 2026-10-04）
+
+以下“尚未实现 / 入口未开放”等是对应日期的阶段快照，不是当前功能清单；
+以本文件最新终验摘要及 `backup-file-safety.md` 为准。
+
+## 已接线的功能（第一批历史）
+
+- Room v5：只新增单行设置表和本机世代元数据表，保留十张业务表和显式迁移链。
+- SettingsRepository、SettingsViewModel、Flow 状态、读取失败禁用、重新读取、失败保存保留值和重复提交保护。
+- Activity 共享设置 ViewModel；主题选择真正影响根 Material 3 主题。
+- 四模块日期展示采用持久化格式；日期存储、业务计算、订阅日期输入和 CSV 仍保持原语义。
+- 新建订阅异步读取保存的默认币种和提醒组合；旧订阅不读取这些默认偏好。
+  读取失败禁用保存；迟到的读取结果只作用于原编辑会话。
+- 提醒组合控件只提交单个天数的选中意图，在事务内对最新已保存组合增删；
+  Flow 发布延迟不会丢失另一项已提交的选择。
+- 偏好读取失败错误与表单验证分离；继续输入不会清除恢复提示，也不再显示正在读取。
+- 通知导航等待初始 back-stack entry 后再跳转，避免冷启动时导航图尚未安装。
+- 设置页只展示已接线的偏好，不展示尚未实现的备份、清空或提醒总开关。
+- 四业务模块和设置 ViewModel 的维护许可/原世代、Main 快照及结果发布、草稿和渲染回调已分批接线；第六批完成 Activity 到达/导航交接与后台消费者局部验收。源头 payload 世代、完整提醒资格及维护退出校准仍待后续，不等于 Phase 5 完成。
+
+## 本批测试和运行证据
+
+基线在 JDK 25 实际重新执行：205 项 JVM 测试、26 套件，0 失败/错误。
+第一批主题与设置存储曾通过 224 项 JVM 测试、debug APK、测试 APK 和 lint；
+lint 为 0 error / 44 warning，APK 18,350,978 字节。此数字是中间结果，
+**不代替当前扩大范围后的最终重跑**。
+
+TDD 记录（不把编译缺 API 当作运行时 RED）：
+
+- v4 -> v5 先观察到期望 v5、实际 v4 的断言失败；实现迁移后通过。
+- 保存非法币种/提前 2 天先观察到未拒绝写入的断言失败；校验后通过。
+- 刷新读取失败保留旧显示但仍允许写入，先观察到错误写入；加入可用状态后通过。
+- 主题选择控件、保存失败后重新读取文案、深/浅色覆盖系统模式均有失败再通过的记录。
+- 日期格式和三模块日期消费先观察到格式/文本断言失败，再接线。
+- 新建 EUR 默认偏好和读取失败保护先观察到旧 CNY/错误保存，再接线。
+- 日期/币种/提醒默认偏好控件先观察到缺少真实交互，再接线。
+- 延迟观察的真实 SettingsScreen + ViewModel 测试先观察到 `{1, 7}` 变成 `{7}`，
+  单天事务增删后通过；读取失败后继续编辑仍保留错误的回归也已增加。
+- 冷启动通知导航先观察到 “Navigation graph has not been set” 异常；等待初始
+  back-stack entry 后，目标打开和事件消费的回归通过。
+- 文件数据库关闭再打开的偏好持久化回归测试已增加；不再将同一个内存库的仓库重建称为重启持久化。
+
+第一批设置范围最终重跑（JDK 25.0.3 / Gradle 9.4.1）：
+
+```powershell
+$env:JAVA_HOME='D:\jdk'
+$env:ANDROID_SERIAL='emulator-5556'
+.\.tools\gradle-9.4.1\bin\gradle.bat --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug :app:connectedDebugAndroidTest
+```
+
+结果：BUILD SUCCESSFUL，1 分 58 秒。
+
+- JVM：247 项 / 32 套件，0 failure / error / skipped。
+- 设备：22 项 / 11 套件，0 failure / error / skipped；实际仪器执行约 23 秒。
+- debug APK 和 androidTest APK 均构建成功。
+- lint：0 error / 45 warning；新增 BOM 的版本更新提示为 warning，旧 AGP/KAPT、SDK、图标及其他历史提示仍未全部清理。
+- debug APK：18,385,010 字节，约 17.53 MiB，低于 30 MB。
+- `git diff --check` 通过；schema 比较确认十张业务表共 75 字段定义均未变化，v5 共 12 表。
+
+新补充的持续观察失败/保存交错、取消写入和习惯日历无障碍日期格式用例也在
+这次全量测试中通过。以上仅验收本批，不代表恢复安全、提醒总开关或性能目标已完成。
+
+## 设备测试定位记录
+
+本轮使用用户已建的 Medium_Phone / Android 15 API 35 / x86_64，独立端口
+`emulator-5556`，`-read-only -no-window -no-snapshot-load -no-snapshot-save`。
+只读会话的磁盘变更在退出后丢弃，不保存用户 AVD 快照；参见
+[Android 官方模拟器说明](https://developer.android.com/studio/releases/emulator)。
+未执行 wipe-data 或清空真实用户数据库。测试业务数据均为合成数据，
+DAO 测试使用独立内存库；迁移测试使用独立测试库，通知测试只编辑未保存草稿。
+设置 Activity 测试改变临时会话的偏好并在 finally 中恢复。
+
+首次真实执行 16 个旧仪器测试，10 通过、6 失败：
+
+- 两个 MigrationTestHelper 用例发生 AbstractMethodError，堆栈进入 Room 的 schema
+  反序列化，尚未进入迁移 SQL。dependencyInsight 确认主 APK serialization core
+  固定 1.6.3，测试 APK JSON 需要 1.8.1。按 Room 的现有需求使用
+  serialization BOM 1.8.1 对齐，而非删除或跳过迁移测试。
+  [Gradle 平台依赖说明](https://docs.gradle.org/current/userguide/platforms.html)。
+- 四个通知 Activity 用例因 ActivityScenario 根据启动 Intent 匹配生命周期，
+  测试创建的不同 action/category Intent 在 setIntent 后无法跟踪关闭或重建。
+  测试复制启动 Intent 并更改通知 extras，仍通过真实 startActivity/onNewIntent
+  路径，保留草稿、重复事件和重建不重放断言。没有修改生产通知代码掩盖此问题。
+
+另增加 1/2/3 -> 5 迁移链和 v4 -> v5 十表 75 字段完整保留的设备用例，
+以及主题/日期选择重建和订阅日期展示用例；最新全量设备重跑已全部通过。
+
+v1 资产原仓库缺失：通过 git 历史核实首版三实体未变化后，v1 测试从 v2
+schema 建立相同三表，删除仅 v2 新增的日程/例外表并设置 user_version=1；
+运行完整 1 -> 5 迁移并验证目标 schema。此为测试夹具，不伪造历史生成的 1.json，
+也不对生产数据库执行删除旧版本表的操作。
+
+第二轮设备重跑 22 项中 17 通过、5 失败：缺少 v1 测试资产，及测试复制启动
+Intent 时继承了 CLEAR_TASK 导致意外冷启动，并暴露通知导航图初始化竞态。
+测试 flags 改为显式 CLEAR_TOP/SINGLE_TOP；冷启动另有独立 JVM 回归验证。
+最新全量设备重跑已全部通过；保留这些定位记录，不隐藏此前失败。
+
+## 尚未完成
+
+- 系统文件选择/有界读取、导出后从文件重新读取验证、恢复保护备份和二次确认。
+- 全局维护底座已实现，四模块真实写入/异步结果/广播校验及恢复后的草稿与导航失效仍未接线。
+- 清空业务数据的二次确认、事务回滚和提醒重建闭环。
+- 三类提醒总开关，以及 Worker/Boot/Receiver、权限返回前台刷新接线。
+- 关于及许可证核实、完整无障碍/大字体/深浅色审计和性能测量。
+- Phase 5 完整验收、阶段提交/推送和远端核对；卡通 UI 尚未开始。
+
+## 已知限制和审查待办
+
+- Worker 建库已统一到默认初始化工厂；维护世代损坏/缺失时明确报错，设置读写不静默补成 0。已补后台入口同一工厂先建库及重开测试；实际 Worker 维护准入及提醒偏好仍待接线。
+- 维护底座已落库并测试，但世代保护还没有四模块/后台业务消费者；不能宣称当前应用恢复并发安全已经实现。
+- 本批深色模式证据覆盖根主题选择，不能替代所有图表、对话框的对比度和 TalkBack 人工验收。
+- 原阶段的子任务、习惯提醒/暂停/归档、完整重复提醒策略等缺口没有默默扩大本批范围。
+- 备份加密、SQLCipher、后台敏感遮罩、国际化、发布签名和最新 SDK 发布适配仍不在已确认本阶段范围。
+
+## 第二批：完整快照和 JSON 校验基础
+
+上一批设置功能已保存为本地提交 `4e3c6ed`；本批继续在同一功能分支工作，
+不将 Phase 5 标记为完成，不提前推送完成状态或开始卡通 UI。
+
+新增领域备份模型/固定字段契约/验证器、数据层 JSON DTO 映射/严格解析器/
+规范化写入器、Room 快照 DAO/仓库及 Hilt 绑定。领域不依赖 Room、Android 或 JSON 库；
+备份模型不会通过普通表单进行 trim、重算、丢弃未知历史或重建主键。
+
+已实现范围：
+
+- Room 单事务读取全部十张业务表及用户设置；本机世代不导出且不改变。
+- JSON v1 / schema v5，SHA-256 完整载荷校验；全部表/字段白名单及严格类型。
+- Long 精度、空串与 null、负色值/排序、原始星期列表、跨币种支付、
+  开始日期前打卡和规则外日程例外均有保留测试。
+- 重复 JSON 成员（含转义后同名）、缺表/字段、未知版本、无效 UTF-8/Unicode、
+  截断/尾部垃圾、过深嵌套、重复主键/唯一键、孤儿引用、父子环明确拒绝。
+- 64 MiB / 合计 100,000 业务行硬上限；先检查 SQLite 文本 UTF-8 字节数和行数，
+  编码时先计数完整规范 JSON（包括转义/元数据），再分配输出数组，hash 采用小块流式计算。
+- 对损坏原库只报告问题，不静默修复；异常位掩码在 Room Long -> Int 缩窄前验证。
+
+TDD 及审查证据：空备份与十表快照先出现“尚未实现”的运行时失败，后通过。
+无效 Unicode 导出先复现未拒绝；修正后通过。独立审查指出原始位掩码
+`4294967297` 被缩窄为 `1`、超大文本在大小检查前读取/分配的问题；两项均在
+真实 Room 回归中先断言失败，再在原始读取边界修正。规范 JSON 字节计数器的
+UTF-8/控制字符/转义扩张用例先失败后实现。补充精确大小/行数边界接受、
+10,000 行无环父链、独立固定 SHA-256 值和递归对象键顺序调整的回归；
+定向复审确认两项 Important finding 均解决，无新 Critical/Important 问题。
+
+本批验证明确是 **Room -> 快照 -> JSON -> 解码字段**，逐项比较所有 75 字段，
+不是把解码结果替换写回数据库。替换事务、保护文件和确认流程仍属于后续任务。
+设备测试使用独立内存库和合成数据，不修改用户业务库。
+
+本批最终全量重跑：仍采用上文同一条五任务 Gradle 命令，JDK 25.0.3 /
+Gradle 9.4.1 / API 35 Medium_Phone 只读会话。结果 **BUILD SUCCESSFUL，3 分 39 秒**。
+
+- JVM：274 项 / 35 套件，0 failure / error / skipped；其中备份基础新增 27 项。
+- 设备：23 项 / 12 套件，0 failure / error / skipped；新增真实 Android 的十表/75字段 JSON 往返用例。
+- debug APK：18,510,312 字节，约 17.65 MiB；androidTest APK：1,154,795 字节，均构建成功。
+- lint：0 error / 46 warning；新增 JSON 显式依赖的更新提示及原有技术债未被隐藏。
+- schema 复核：十表/75字段旧定义 0 项变化；数据库仍 v5/12表，不需要新 migration。
+- `git diff --check` 通过；临时构建/设备日志、真实数据库、备份或密钥均未纳入提交。
+
+仍未完成真实文件备份/恢复、维护并发、提醒总开关和最终性能验收。
+大小限制不等同于所有低内存设备的容量保证；完整 64 MiB / 100,000 行 Android
+极限压力测试尚未执行，后续文件/性能验收必须据实记录。
+
+## 第三批：维护与世代底座（2026-10-03）
+
+这是任务 4 的第一部分，**尚未完成四模块及后台接线**。未新增恢复、清空或未接线提醒按钮，未把本批称为 Phase 5 完成。
+
+已实现：
+
+- Hilt 单例维护协调器，冻结后拒绝新写许可并排空全部已准入操作；短锁只保护状态，不跨数据库 I/O、模块锁、文件选择或人机确认。
+- 取消排空/读取失败安全释放；操作异常或取消释放许可；会话仅由所属协调器使用，外来/过期会话、嵌套全局准入、并发会话任务与运行中提前释放被拒绝。
+- 世代严格读取、观察和数据库变更/世代递增的原子 Room 事务；旧世代在 mutation 前失败，Long 上限提前拒绝，业务失败/提交前取消回滚，误改维护元数据也整体回滚。
+- 主应用/Worker 统一数据库工厂、默认初始化回调及迁移链；设置读写不补建缺失世代。十张业务表和 schema v5 均未改变。
+- 接线/取消/异步结果发布约束见 `maintenance-coordination.md`；底座没有自动拦截全部现有 DAO/仓库入口。
+
+TDD：先修复测试自身的 RoomDatabase `use` 编译错误（不计作 RED），再实际运行 22 项新 JVM 测试，22 项失败：21 项是缺实现，1 项复现设置读写将缺失世代重置为 0。实现后 21/22 通过，剩余后台工厂首次建库缺世代行用例失败；加入共用初始化回调后 22/22 通过。测试使用合成数据和独立库，不读写真实用户业务数据。
+
+本批新增 2 项 Android 回归，分别验证同一后台工厂先建库/关闭重开持久化，以及事务取消回滚、世代提交后同 ID 旧令牌拒绝。它们不是完整文件恢复测试，也不代替四个真实 ViewModel/广播接线的恢复竞态验收。
+
+本批审查修正前的中间全量重跑使用上文五任务命令，JDK 25.0.3 / Gradle 9.4.1 /
+API 35 Medium_Phone 独立只读会话。结果 **BUILD SUCCESSFUL，1 分 30 秒**。
+
+- JVM：296 项 / 37 套件，0 failure / error / skipped；本批新增 22 项。
+- 设备：25 项 / 13 套件，0 failure / error / skipped，实际仪器执行约 25.5 秒；本批新增 2 项。
+- debug APK：18,681,585 字节，约 17.82 MiB；androidTest APK：1,192,043 字节，两者构建成功。
+- lint：0 error / 46 warning；已有 AGP/KAPT、SDK、图标及版本提示未被隐藏。
+- schema 仍 v5 / 12 表 / 十张业务表 75 字段；本批 schema 没有变更，`git diff --check` 通过。
+- 后续独立审查发现取消交付和替换 Job 的会话泄漏；上述中间结果不能代替修正后最终重跑。
+
+审查修正记录：世代读取返回时取消真实 Job，已先复现未交付会话遗留 READY；加入读取后的取消检查及唯一作用域入口 `withSession`，内部 begin/finish 私有化，finally 释放并等待结构化子协程。新增 READY/RUNNING 取消及异常退出用例。复审又复现 `launch(Job(), UNDISPATCHED)` 继承标记但不被拥有者等待，退出残留冻结；新增精确失败回归，入场检查改为会话作用域真实根 Job 及当前 Job 父链，而不只验证标记。两项已修正并通过最终独立复审，无新增 Critical/Important；审查另运行最新 18 项协调器测试，并核实正常 launch/async/withContext 合法、独立 Job 在进入操作前拒绝。
+
+修正后最终完整重跑仍使用五任务命令，结果 **BUILD SUCCESSFUL，1 分 54 秒**：
+
+- JVM：301 项 / 37 套件，0 failure / error / skipped；本批共新增 27 项（18 项协调器、9 项 Room）。
+- 设备：25 项 / 13 套件，0 failure / error / skipped，实际仪器执行约 21.6 秒。
+- debug APK：18,681,585 字节，约 17.82 MiB；androidTest APK：1,191,990 字节，均构建成功。
+- lint：0 error / 46 warning；仍非零 warning，不称 lint 完全无警告。
+- schema 无变更，`git diff --check` 通过。只使用独立测试库、合成数据及只读 AVD 会话，未执行 wipe-data 或清空用户库，构建产物/设备日志不纳入提交。
+- 最终结果覆盖底座与原有功能回归，不代表恢复文件、四模块旧草稿或 Receiver 世代接线已验收。
+
+下一批先接入四模块/设置真实写入及异步结果、导航和后台准入，再做文件恢复/清空闭环。Phase 5 最终验证和远端推送之后才开始卡通 UI。
+
+## 第四批：打卡与设置消费者（2026-10-03）
+
+这是任务 4 的消费者第一批，不是四模块、导航和后台的整体完成验收。未增加文件恢复、清空或提醒总开关的占位按钮；未修改 schema、Manifest、构建依赖或原需求文档。
+
+已实现：
+
+- 共用 `GenerationAccess`：UI 事件在派发前拒绝维护状态；实际写入在协程执行时再次校验原世代，许可覆盖数据库操作及 Main 状态发布。仅错误展示可延后等待维护结束，不排队重放写入。
+- 长驻 Flow 仅通知重新读取；冷查询、读取世代和页面状态发布在同一次许可内，避免给旧 DTO 标记新世代。
+- 打卡页面/编辑草稿和全部编辑输入、保存、关闭、删除、打卡回调携带渲染时的世代。维护取消保留草稿，提交后清理旧草稿和统计选择；同 ID 旧回调及延迟旧写入不能改变新记录。
+- 打卡保存保护重复提交、保存期间草稿及已有记录存在性；现有 DAO 更新接口仍确保旧编辑不能插入已删除记录。维护期间禁用新增/打卡/保存/删除，保留已读列表和草稿。
+- 设置写入接入同一许可；保留读失败禁用、读取重试、保存取消、事务内修改提醒组合与延迟观察语义。错误发布自身遇到元数据故障也安全停写，重试重新订阅真实世代，不自动重放失败选择。
+- 币种本地输入同时以已保存币种和世代作为 remember key：取消维护不丢输入；成功更换数据即使币种相同也清除旧输入。
+
+TDD 证据：共用保护层 4 项先运行时失败后实现；消费者定向 40 项中新增 12 项先出现行为断言失败，接线后 ViewModel 保护通过。Robolectric 暂停主线程导致 IO 到 Main 发布的界面等待超时；仅调整测试等待以处理主线程消息，6 项原有习惯 UI 回归恢复通过，没有把生产发布移回 IO。随后定向 58 项中 7 项失败，分别是维护按钮、旧编辑器回调及元数据故障/重试用例；修正后 58 项全部通过。另增加“临时读取故障后再更换数据”组合回归，先复现旧草稿未失效，再改为保留快照最后验证的世代标签且禁用写入，最终全量覆盖该修正。依赖注入生成代码与并行构造器编辑不同步的编译错误经统一重新生成解决，不计为功能 RED。
+
+新 Android 回归使用真实 Room、真实仓库、真实 ViewModel 和同一协调器，验证维护取消保留草稿，以及提交后同 ID 打卡记录/设置不被旧回调修改；使用独立内存库和合成数据。固定 ID 数据通过测试 DAO 插入，不改变普通编辑接口的更新语义。它们仍不是 SAF 文件恢复或完整四模块恢复验收。
+
+审查修正前的中间五任务重跑：JDK 25.0.3 / Gradle 9.4.1 / API 35 Medium_Phone 独立只读会话，**BUILD SUCCESSFUL，2 分 2 秒**。此结果不能替代以下修正后的最终验证。
+
+- JVM：325 项 / 40 套件，0 failure / error / skipped；新增 24 项。
+- 设备：27 项 / 14 套件，0 failure / error / skipped，实际仪器执行约 20.5 秒；新增 2 项。
+- debug APK：18,681,585 字节，约 17.82 MiB；androidTest APK：1,203,665 字节，均构建成功。额外核对 debug APK dex 中已包含新共用保护类。
+- lint：0 error / 46 warning；原有警告没有被屏蔽。
+- schema 仍 v5 / 12 表 / 十张业务表 75 字段，未更改迁移或数据定义；`git diff --check` 通过。
+
+未完成：待办、日程、订阅 ViewModel/模块操作，导航/通知事件，Receiver/Worker/启动校准及根设置观察的完整接线；文件导出、保护备份、二次确认、全量替换、清空、提醒总开关与性能/关于验收仍在后续任务。读取故障时习惯页停写并提示重新启动检查数据，不提供自动修复损坏元数据；设置提供安全读取重试。最大文件/行数 Android 压力及完整进程死亡闭环仍未验收。
+
+独立审查指出三项 Important 竞态：短暂维护的中间状态被合并后观察可能停止；设置长驻订阅在准入外初始化；旧元数据错误回退在 Main 延迟执行时可能禁用新页面。补充 7 项确定性回归，定向 33 项中 7 项先失败：一次性 Busy 注入模拟读取被拒但维护状态已回到 IDLE，验证两 ViewModel 恢复观察且写入不重试；真实 Room 的 BEFORE INSERT 拒绝触发器和缺失设置行验证订阅无写入；测试专用 Main 派发器延迟旧回退，复现习惯已发布新快照、设置新世代已观察但新偏好尚未发布时的错误覆盖。没有向生产代码加入测试钩子。
+
+修正为只读查询自行重新捕获/读取、设置观察纯只读、Main 回退核对原标签；设置同时核对已观察世代，防止旧失败标记阻断新偏好读取。默认设置测试使用实际数据库新建回调，仍检查默认持久化和业务记录不变。定向 33 项实际 GREEN；最终独立复审确认全部三项已解决，无遗留 Critical/Important，未要求进一步源代码修改。
+
+复审修正后完整五任务再次执行，**BUILD SUCCESSFUL，1 分 22 秒**：
+
+- JVM：332 项 / 40 套件，0 failure / error / skipped；本批共新增 31 项。
+- 设备：27 项 / 14 套件，0 failure / error / skipped，实际仪器执行约 21.0 秒。
+- debug APK：18,577,308 字节，约 17.72 MiB；androidTest APK：1,203,665 字节，均构建成功。
+- lint：0 error / 46 warning；schema / Manifest / 构建依赖无变更，`git diff --check` 通过。
+- 本次只读 AVD 会话已关闭；未清空用户设备/数据库，构建产物、设备日志、真实数据和密钥不纳入提交。
+
+本批沿用 brainstorming 的已确认设计，以 Buddy 和 dispatching-parallel-agents 分工；test-driven-development 用于 RED/GREEN，systematic-debugging 定位编译/界面等待问题，requesting-code-review 与 receiving-code-review 用于独立审查及逐项验证，verification-before-completion 要求实际完整重跑后才记录通过。
+
+当前不将局部验收称为 Phase 5 完成。后续先接入待办/日程/订阅及导航/后台，然后实现文件维护闭环。Phase 5 整体完成、验证并推送远端后才开始卡通 UI。
+
+## 第五批：待办、日程、订阅消费者（2026-10-03，本批完成）
+
+继续任务 4，不修改备份格式、schema 或原需求，不提前开放恢复和清空入口。
+本批覆盖三个业务 ViewModel、编辑/详情/付款草稿、结果发布和页面回调；
+Activity 级导航事件、系统广播和 Worker 仍是后续独立接线范围。
+
+先新增 `BusinessMaintenanceConsumerDeviceTest`，使用真实 Android Room、仓库、
+ViewModel 和维护协调器，只有系统闹钟服务使用测试替身。独立内存库中的合成记录
+保持相同 ID 并更换内容，断言旧编辑草稿失效；不是 SAF 文件替换恢复测试。
+
+在现有实现上实际执行定向设备 RED：
+
+```powershell
+$env:JAVA_HOME='D:\jdk'
+$env:ANDROID_SERIAL='emulator-5556'
+.\.tools\gradle-9.4.1\bin\gradle.bat --no-daemon :app:connectedDebugAndroidTest '-Pandroid.testInstrumentationRunnerArguments.class=com.example.lifemanager.data.local.BusinessMaintenanceConsumerDeviceTest'
+```
+
+结果：3 项均在运行时断言失败，旧编辑器仍然打开（`Expected value to be false`）；
+BUILD FAILED，41 秒。不是缺 API 或构造器编译错误。设备仍为 Medium_Phone /
+Android 15 API 35 / x86_64 的独立只读会话；未执行 wipe-data、清空用户库或保存快照。
+这次设备执行仅是 RED 证据，不是接线完成或回归通过的证明。
+
+三个模块随后新增 80 项 JVM 回归，并在生产代码仍未接线时联合执行：
+80 项实际运行，70 项失败、10 项通过，BUILD FAILED，51 秒；测试编译成功。
+其中一个扣费删除用例在错误删除后调用 `single()` 产生 NoSuchElementException，
+后续调整为先明确断言记录 ID 列表；不把这一次异常当作精确断言 RED。
+其余失败涉及 Busy 排队写入、排空顺序、旧回调/通知/CSV、元数据故障和缓冲 DTO。
+10 项原有兼容行为（如通知草稿交接）用于回归约束，不宣称为新增保护的 RED。
+
+接线后定向运行 173 项，167 通过、6 失败（2 分 53 秒）：真实 Room 的
+有限设置读取仍执行初始化 INSERT、缺失设置被读取/更新补建共 3 项；
+延迟的旧日程观察错误覆盖新世代页面 1 项；待办/日程维护中 FAB 缺少
+disabled 语义 2 项。分别改为设置有限读写严格拒绝缺失行、旧观察错误在
+Main 调度前绑定原标签，以及按钮语义禁用且保留点击守卫。
+
+再次运行 174 项，173 通过、1 失败（1 分 34 秒）：以上 6 项均通过，
+新增订阅 FAB 回归精确复现维护期间仍被 Compose 语义标记为 enabled。
+这些定向结果是 RED/GREEN 过程记录，不代替最终全量和设备验收。
+
+本批实现及边界：
+
+- 三个 ViewModel 的页面/草稿带原世代，写入在协程执行时再严格准入；
+  全局许可在模块 Mutex 外，覆盖数据库操作与真实 Main 状态发布。
+- 长驻业务 Flow 只作失效通知，重新冷查询后再发布，避免缓存旧 DTO 被标记
+  为新世代。维护取消保留草稿，提交使编辑、冲突确认、详情、扣费和旧回调失效。
+- 待办/日程/订阅通知目标与排队交接保留到达时的世代，冷启动只尝试一次捕获；
+  查询可等待原令牌的临时维护结束，写入不能排队重放。交接发生在原许可释放后。
+- 订阅新建默认偏好读取受保护，失败保留输入并禁止静默保存；设置默认行只由
+  新建/显式迁移产生，既有 v5 缺失行的观察、有限读取和更新均明确失败。
+- CSV 保存位置选择携带原世代与请求 ID；关联跨重组/旋转保留，旧取消/URI
+  不能消费新请求。已开始的旧外部文件写入可完成，但旧成功/错误不覆盖新页面。
+- 维护中保留可读列表，禁用业务写入口和新增按钮的语义；不改变数据库 schema、
+  Manifest、依赖、备份格式或原需求，不创建尚未实现功能的入口。
+
+未完成与限制：Activity 导航事件仍需从接收 Intent 起绑定世代，Receiver/Worker
+尚未接入维护准入和提醒退出校准；以上 ViewModel 保护不能替代源头广播校验。
+根主题/日期已经通过受保护 SettingsViewModel 消费，本批只审计该现有接线。
+SAF 备份文件、保护备份、二次确认、单事务全量替换/清空、提醒总开关、关于、
+无障碍/性能及完整进程死亡闭环仍待后续。新设备测试的替换是合成事务，
+不是用户文件恢复；CSV 文件提供方及选择结果旋转仍需设备人工验收。
+
+独立审查前的完整五任务重跑使用上文命令，JDK 25.0.3 / Gradle 9.4.1 /
+API 35 Medium_Phone 独立只读会话，**BUILD SUCCESSFUL，2 分 7 秒**：
+
+- JVM：424 项 / 44 套件，0 failure / error / skipped；相比上一批新增 92 项。
+- 设备：30 项 / 15 套件，0 failure / error / skipped，实际仪器执行约 20.3 秒；新增 3 项真实消费者回归。
+- debug APK：18,773,928 字节，约 17.90 MiB；androidTest APK：1,220,900 字节，均构建成功。
+- lint：0 error / 46 warning；保留原有 AGP/KAPT、SDK、图标和版本提示，不称为无警告。
+- schema、Manifest、构建依赖和原需求无变更；`git diff --check` 通过。
+- 新订阅 FAB 语义回归已实际 GREEN；设置有限读写及旧日程错误回归也在全量中通过。
+
+这是审查前结果；独立审查结论及如有修正后的最终验证仍需记录，不能把
+上述分批测试当成真实文件恢复或 Phase 5 完整完成。
+
+独立审查发现 1 项 Important：待办保存 A 已提交并关闭编辑器后，其提醒/最终
+清理仍可在运行；用户同世代打开新草稿 B 并保存时，A 的 finally 只检查世代，
+会误清除 B 的保存标记，允许重复插入。修正前补充确定性测试：只在测试调度器
+延迟 A 的最终 Main 清理，暂停 B 的仓库写入后释放 A，随后再次保存 B。
+测试替身为新建记录分配不同 ID，避免固定 ID 覆盖掩盖重复插入；生产代码无测试钩子。
+
+该用例实际 RED（49 秒，编译成功）：期望 A/B 共 2 次保存，实际 3 次，
+`A cleanup allowed B to be inserted twice expected:<2> but was:<3>`。
+随后为保存分配独立操作身份，finally 只清理仍归属于该操作的标记；世代更换
+清除操作身份，与已有日程消费者采用同样的拥有者检查，未扩展业务功能。
+
+待办定向 47 项实际 GREEN（1 分 36 秒，0 failure / error / skipped），包含
+上述重复插入回归。独立复审检查操作身份在派发前设置、世代更换时失效、
+Busy/取消时清理原操作，并确认 RED XML 的 2/3 次保存断言；未发现新增
+Critical/Important/Minor。本批审查批准以修正后完整五任务再次通过为条件。
+CSV 选择器启动异常与真实旋转结果恢复未被本批设备测试覆盖，不能宣称已经验收。
+
+复审修正后完整五任务再次执行，**BUILD SUCCESSFUL，1 分 41 秒**：
+
+- JVM：425 项 / 44 套件，0 failure / error / skipped；本批共新增 93 项。
+- 设备：30 项 / 15 套件，0 failure / error / skipped，实际仪器执行约 19.0 秒；本批新增 3 项。
+- debug APK：18,773,928 字节，约 17.90 MiB；androidTest APK：1,220,900 字节，均构建成功。
+- lint：0 error / 46 warning；原有警告未被隐藏。
+- schema 保持 v5 / 12 表 / 十张业务表 75 字段；schema、Manifest、构建依赖及原需求无变更，`git diff --check` 通过。
+
+独立审查的 Important 已先精确复现再修正，复审条件由上述最终重跑满足。
+本批沿用已确认设计，Buddy/并行分工接线，以 TDD 和独立审查发现并修正重复插入竞态；
+verification-before-completion 用于在记录通过和提交前执行完整重跑。
+
+本批完成不等于任务 4 或 Phase 5 整体完成。下一步是 Activity 导航事件、
+Receiver/Worker 准入和提醒校准，再做文件维护闭环；Phase 5 全部验收并推送远端后
+才开始卡通动感 UI，当前未作为完成阶段推送。
+
+本次独立只读 AVD 会话已关闭并核对 adb 无残留设备；未执行 wipe-data、
+清空用户库或保存用户快照。仅提交源码、测试和文档，APK、设备日志、合成库、
+个人数据和密钥不纳入 Git。
+
+### 第六批：通知导航与后台消费者接线（2026-10-04，局部验收通过）
+
+本批承接 `b400671`，仅覆盖 Activity 导航的原世代交接、Receiver 的有限
+准入，以及启动 / 系统事件 / Worker 的共享校准。Task 4 仍为部分完成，
+Task 5 文件维护闭环和 Task 6 完整提醒资格 / 设置 / payload 世代尚未完成。
+这不是 Phase 5 完成验收，暂不推送远端，也不开始 UI 改版。
+
+分批运行记录（均不能替代最终全量验收）：
+
+- Worker 初次运行 2 项编译成功后实际 RED：维护中期望 retry，旧实现返回 success。
+- 导航及到达准入初次联合运行 52 项，35 项失败；接线后导航 60 项与原导航 9 项实际通过。
+- 定向运行 95 项，92 项通过、3 项失败：捕获元数据超时未及时 finish、Boot 仍持有
+  异步广播均为行为 RED；启动 fixture 重复初始化 WorkManager 为测试装置错误，不算 RED。
+- 修正测试装置后运行 22 项，21 项通过；剩余启动校准行为 RED 为期望 1 个即时任务、
+  实际 0 个。随后补充 Application 的即时入队，仍需最终重跑。
+- 测试装置曾出现 WorkManager 未初始化和 Kotlin/JVM 工厂名不同导致的编译错误；
+  均单独修正，不作为功能 TDD 的 RED 证据。
+
+独立审查发现两个 Important：新世代通知交接可能被迟到的旧 UI 观察上下文误取消；
+即时校准的 KEEP 会丢弃运行期间到来的新系统事件。已按下述 RED 证据修正源码，
+独立复审及修正后完整验证仍在进行，未宣称审查批准或全量通过。
+
+审查后的第一轮定向执行 14 项，9 通过、5 实际 RED（2 分 59 秒，编译成功）：
+待办两个时序均未保留新编辑器；订阅两个时序均丢失应打开的详情 ID；日程在
+观察先于 lookup 时也丢失新编辑器。三个模块旧令牌拒绝、日程 lookup 先于观察、
+订阅 Receiver 的三项真实 Room 准入及两项启动 / Boot 回归通过。五项失败均为
+业务断言，非构造器、依赖或装置错误；此时生产代码仍未修复观察竞态。
+
+Worker 队列回归随后单独运行 3 项，2 通过、1 实际 RED（28 秒，编译成功）：
+实际 Worker 已 RUNNING 并读取真实 Room；送达时区变化广播后，期望保留 2 个
+校准任务、实际 1 个。FAILED/CANCELLED 终态 fixture 入队回归通过。随后改为
+APPEND_OR_REPLACE；Boot 两事件测试不再承诺合并，改为保留两轮串行当前数据校准。
+主回归继续验证 A 成功后 B 实际执行、重新读取合成的最新 Room 内容并更新真实
+Android scheduler 闹钟，非仅检查任务数量；测试手动启动真实 Processor，未改变宿主
+时区或实际推进系统时间。终态两项仅验证真实 WorkManager 持久队列与依赖，不声称
+执行失败 / 取消 Worker 的完整设备闭环。
+
+多轮校准的代价及前置 retry / 后续失败取消传播限制见 maintenance-coordination；
+这不替代 Task 5 的维护退出校准闭环。三个 ViewModel 现在按通知自身世代保留有效
+请求，许可内 Main 发布先失效旧上下文，再打开新目标；原待办保存操作拥有者保护保留。
+
+首次修正后完整五任务运行 4 分 51 秒：527 项 JVM 中 526 通过、1 失败；32 项
+设备回归均通过，debug/test APK 和 lint 执行完毕。失败位于队列测试末尾：对整个
+AlarmManager 队列调用 single，误包含 WorkManager 自有闹钟；A/B 真实执行、依赖
+及 Room 最新内容断言已通过。修正测试定位为待办原 data identity，仍要求该业务
+闹钟唯一；这一装置断言问题不作为新生产缺陷的行为 RED。
+
+复审另指出迟到的中间世代仍可能取消更晚世代的请求（例如页面 G7、库 G9、请求
+G9、随后观察 G8）。已为三模块补充连续两次真实协调提交、暂停 lookup、再发出
+中间观察的回归；正在验证，尚未批准本批提交。
+
+该轮定向运行 6 项，3 通过、3 实际 RED（1 分 38 秒，编译成功）：三模块都丢失
+应保留的当前世代通知；队列三项均 GREEN，包括 B 实际执行与当前业务闹钟更新。
+随后将页面失效与请求失效边界分离：无标签请求维持原保护；有标签请求只有观察
+世代超过自身世代才取消，迟到的中间观察只清旧页面。最终 lookup/发布仍在
+原令牌的严格许可内，不重新捕获世代，也不开放旧写入。
+
+随后五任务重跑的设备结果为 31 / 32：待办原 Activity 回归在 openDraft 的
+标题输入前失败。原装置找到始终存在的新增 FAB 就点击，未等待其 Room 快照可用；
+Compose 空闲不代表 IO 查询完成，而生产 FAB 在不可用时明确 disabled 并拒绝点击。
+此前同批设备 32 项曾通过，不能用一次通过隐藏这项时序依赖。对待办与同模式日程
+装置改为有界等待真实 UI 启用语义，随后 assertIsEnabled 再点击；未加固定延时、
+生产钩子、跳过或削弱原草稿/消费/重建断言。当前正在定向重跑与最后完整验收。
+
+四项待办 / 日程 Activity 定向设备回归随后全部 GREEN（1 分 23 秒）。独立复审
+核对三个世代边界、严格原令牌许可、队列真实执行和设备条件等待，未发现剩余
+Critical / Important；批准条件为最新源码和完整五任务重新通过。
+
+最终使用上文完整五任务命令，JDK 25 / Gradle 9.4.1 / API 35 Medium_Phone
+独立只读会话，**BUILD SUCCESSFUL，1 分 59 秒**：
+
+- JVM：530 项 / 52 套件，0 failure / error / skipped；本批新增 105 项。
+- 设备：32 项 / 16 套件，0 failure / error / skipped；仪器执行约 52.5 秒，本批新增 2 项。
+- debug APK：18,852,948 字节，约 17.98 MiB；androidTest APK：1,221,077 字节，均构建成功。
+- lint：0 error / 46 warning；AGP/KAPT、SDK、图标等原有提示未隐藏，不称为无警告。
+- 三个中间世代回归、两种单次推进时序、严格旧令牌拒绝和 A→B 实际 Worker
+  重新读取 / 业务闹钟更新均在全量中 GREEN。
+- 新设备测试经默认 Java 两参数工厂构造生产 Worker，验证它与 Receiver 使用
+  实际应用 Hilt 协调器；READY/DRAINING 返回 retry，释放后读取成功。未另建业务库。
+- schema 保持 v5 / 12 表 / 十张业务表 75 字段；schema、Manifest、依赖及原需求无变更。
+  `git diff --check` 通过；构建产物、测试库和日志均不纳入 Git。
+
+以上最新结果满足独立复审条件。本批沿用 Buddy 分工与 TDD，独立审查推动修复
+有效通知丢失和后台请求遗漏；systematic-debugging 定位测试装置等待问题，
+verification-before-completion 要求修正后完整重跑，再记录通过和提交。
+
+本次仅本地提交这一批源码、测试、README 与验收文档；Phase 5 未完整验收，
+不以完成阶段推送远端，UI 尚未开始。下一步按已确认计划完成文件导出、保护备份、
+二次确认、事务恢复 / 清空及退出校准，再补完整提醒载荷 / 设置保护与最终质量验收。
+
+审查者只读核对上述最终 XML、lint 和 APK 后解除条件批准；第六有界批次通过审查，
+不扩大为任务 4 或 Phase 5 整体批准。本次 owned 只读 AVD 已按 PID、命令行与
+端口核对后关闭，adb 无残留设备；未 wipe-data、清空真实用户库或保存用户快照。
+仅显式提交本批文件；APK、测试日志、合成数据库、密钥和个人数据不进入仓库。
+
+范围限制：这里只拒绝已经绑定旧世代的到达事件；旧系统 alarm 如果直到恢复后才到达，
+仍可能按到达时的新世代执行。下一批必须在 scheduler / broadcast / 点击 Intent 源头绑定
+世代，并补齐日程 Room 资格及总开关检查。维护退出后的成功 / 取消 / 失败校准闭环、
+真实 SAF 文件恢复及进程死亡仍待后续；不把合成事务当成用户备份恢复。
+
+### 第七批：文件导出和私有输入预览底层（2026-10-04，局部验收通过）
+
+承接 `7f9829b`，只实现 Task 5 的文件基础子批。settings ViewModel / 系统选择器
+尚未接入，不增加按钮、空页面或样例业务记录。没有数据库恢复 / 清空入口或执行 API，
+保护备份和二次确认不会被绕过。详细契约及后续必做见 `backup-file-safety.md`。
+
+已实现且最终完整验证通过：
+
+- domain 文件端口、真实预览计数和导出用例；data 的 Android ContentResolver 流，
+  Hilt 绑定现有备份仓库、codec、全局维护协调器与 IO dispatcher。
+- 原世代普通许可只覆盖一致 Room 快照，外部文件 IO / 编解码在许可及数据库事务外。
+  输出 flush / close 后必须受限重读、全量校验并匹配本次文档，才返回成功。
+- 只接受系统 `content:` 文档；`wt` 请求截断。不信任声明大小或 available，
+  按实读字节限制 64 MiB；第一个超限字节不写进临时文件，零进展读取不会忙等。
+- 输入先进入私有 cache 随机临时文件，关流后校验；成功、错误、取消 finally
+  只清理确切 owned 文件。取消不包装为普通错误，不删除用户的输入或输出文档。
+
+开发时先写测试和可编译的未实现脚手架，三个定向命令依次实际运行：
+用例 13 / 流适配 20 / ContentResolver 3 项全失败，均为运行时未实现异常，
+不是既有生产缺陷的回归 RED、不是编译错误。脚手架随后全部替换，未进入提交。
+首次联合 36 项为 34 通过、2 失败：Robolectric provider 创建时 authority 为 null，
+以及协程栈恢复复制异常导致 assertSame 失效。根据实际 XML / SDK 调用链 / 本地
+Robolectric API 定位后，只修正装置 authority 与异常传播断言；不调整生产保护。
+另外一次命令把 --tests 置于 Android 任务后，Gradle 配置即失败，不计为行为 RED。
+
+修正后定向命令：
+
+```powershell
+$env:JAVA_HOME='D:\jdk'
+$env:ANDROID_SERIAL='emulator-5556'
+.\.tools\gradle-9.4.1\bin\gradle.bat :app:testDebugUnitTest `
+  --tests '*BackupFileUseCasesTest' --tests '*AndroidBackupFileStoreTest' `
+  --tests '*ContentResolverBackupStreamsTest' :app:connectedDebugAndroidTest `
+  '-Pandroid.testInstrumentationRunnerArguments.class=com.example.lifemanager.data.backup.BackupFilesDeviceTest' `
+  --offline --console=plain
+```
+
+BUILD SUCCESSFUL，43 秒；XML 36 项 JVM / 3 套件与 API 35 的 2 项设备回归通过，
+无 failure / error / skipped。设备用真实 Downloads provider（不是 SAF 选择器），
+独立合成 Room 库验证十表 75 字段、设置和 Long 往返，原库 / 本机世代不变；损坏或
+已删除文档明确拒绝且不残留本次临时文件。只插入未发布合成文档，finally 删除确切
+返回 URI；不访问真实用户库，不清应用数据、不新增生产测试 provider。
+
+上述定向结果之后继续完整五任务和独立审查，没有据此提前提交。本批及 Phase 5 未推送，
+UI 改版未开始。恢复 / 清空事务、保护备份去重 / 二次确认、维护退出提醒校准、
+Task 6 完整载荷 / 偏好保护、强制杀进程后的临时区清理 / 状态重置仍待后续。
+流取消为协作式检查，不承诺即时打断阻塞 provider；64 MiB 不等于峰值内存，
+也没有真实磁盘耗尽 / 云 provider / 文件选择器 / 用户数据库恢复或进程死亡验收。
+
+第一轮完整五任务随后 BUILD SUCCESSFUL（1 分 20 秒）：566 JVM / 55 套件、
+34 设备 / 17 套件，均无 failure / error / skipped，仪器执行 34.121 秒。
+lint 实际报告 0 error / 28 warning，未新增 suppress；debug / 测试 APK 构建成功。
+独立审查未发现 Critical / Important，仅两项 Minor：并发创建临时目录可能误拒绝，
+以及清理错误的两个分支缺直接测试。已按反馈补三项真实文件系统 / 确定性时序测试：
+原实现运行 3 项（53 秒）为 2 GREEN / 1 行为 RED，失败明确为目录已经被另一操作
+创建后仍报“无法创建私有备份临时区”。源码只增加 mkdirs 失败后的 isDirectory 重查。
+清理-only 失败明确不返回成功；清理与校验同时失败保留原校验错误并附 suppressed，
+不递归删除故障装置的非空目录。测试自身的 owned TemporaryFolder 由 JUnit 清理。
+
+源码修正后采用以下 --rerun-tasks 强制完整五任务图，不把第一轮结果当作修正后通过：
+
+```powershell
+$env:JAVA_HOME='D:\jdk'
+$env:ANDROID_SERIAL='emulator-5556'
+.\.tools\gradle-9.4.1\bin\gradle.bat :app:testDebugUnitTest :app:assembleDebug `
+  :app:assembleDebugAndroidTest :app:lintDebug :app:connectedDebugAndroidTest `
+  --rerun-tasks --offline --console=plain
+```
+
+**BUILD SUCCESSFUL，2 分 49 秒，101 项任务实际执行。** JDK 25 / Gradle 9.4.1 /
+API 35 Medium_Phone 独立只读、隐藏会话，最终 XML / lint / APK 核对：
+
+- JVM：569 项 / 55 套件，0 failure / error / skipped；本批新增 39 项。
+- 设备：34 项 / 17 套件，0 failure / error / skipped；仪器执行 33.166 秒，本批新增 2 项。
+- debug APK：18,528,475 字节，约 17.67 MiB；androidTest APK：1,213,629 字节，约 1.16 MiB。
+- lint：0 error / 28 warning；Room 旧索引、AGP/KAPT 和 SDK 等构建提示未隐藏。
+  最终体积和警告数取本次强制构建，不承诺相对旧增量报告的数值变化是功能优化。
+- 三个审查后测试均 GREEN：并发目录创建、单独清理失败、主失败附清理失败。
+  独立限定复审未发现剩余 Critical / Important / Minor，批准条件已由最新完整验证满足。
+- DEX 已核对包含新文件实现；schema 保持 v5 / 12 表 / 十表 75 字段，原需求、
+  主 Manifest、Gradle / 依赖、数据库 schema 无改动；`git diff --check` 通过。
+
+本批沿用已确认设计，以 TDD 验证文件行为；systematic-debugging 定位装置失败，
+requesting / receiving-code-review 的独立审查推动目录竞态修复及清理分支测试，
+verification-before-completion 要求修正后强制完整重跑。仅本地提交源码、测试、README
+及验收文档；构建产物、合成文件、缓存、测试日志、密钥和个人数据不纳入 Git。
+这只批准 Task 5 的文件底层子批，不代表 Task 5 / Phase 5 完成，也不开放未验收 UI。
+
+审查者独立核对最后 569 / 34 的 XML、三个新增回归、lint 与 APK 后确认批准条件满足，
+未发现待处理项。owned AVD 已按进程命令行 / 端口核对后关闭，adb 无残留设备；
+没有 wipe-data、删除 AVD 或写入用户快照。仅清理可重跑生成的合成测试文档及 owned
+临时文件，不删除用户来源 / 输出文档或真实业务库。

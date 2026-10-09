@@ -20,7 +20,7 @@ class SubscriptionReminderDeliveryTest {
     )
 
     @Test
-    fun `invalid old broadcast preserves current pending nine am alarm at nine oh five`() {
+    fun `invalid old broadcast preserves current pending nine am alarm at nine oh five`() = kotlinx.coroutines.test.runTest {
         val alarms = PendingAlarmState()
         val shown = mutableListOf<Subscription>()
         SubscriptionReminderDelivery.reconcile(
@@ -32,7 +32,7 @@ class SubscriptionReminderDeliveryTest {
     }
 
     @Test
-    fun `valid delivery consumes current offset before scheduling next cycle and posts current data`() {
+    fun `valid delivery consumes current offset before scheduling next cycle and posts current data`() = kotlinx.coroutines.test.runTest {
         val alarms = PendingAlarmState()
         val shown = mutableListOf<Subscription>()
         SubscriptionReminderDelivery.reconcile(
@@ -44,7 +44,7 @@ class SubscriptionReminderDeliveryTest {
     }
 
     @Test
-    fun `deleted subscription clears pending alarm without posting`() {
+    fun `deleted subscription clears pending alarm without posting`() = kotlinx.coroutines.test.runTest {
         val alarms = PendingAlarmState()
         val shown = mutableListOf<Subscription>()
         SubscriptionReminderDelivery.reconcile(

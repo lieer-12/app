@@ -8,6 +8,18 @@ import com.example.lifemanager.domain.repository.HabitRepository
 import com.example.lifemanager.domain.repository.TodoRepository
 import com.example.lifemanager.domain.repository.SubscriptionRepository
 import com.example.lifemanager.data.repository.SubscriptionRepositoryImpl
+import com.example.lifemanager.data.repository.SettingsRepositoryImpl
+import com.example.lifemanager.data.repository.DataGenerationRepositoryImpl
+import com.example.lifemanager.domain.maintenance.DataGenerationRepository
+import com.example.lifemanager.domain.repository.SettingsRepository
+import com.example.lifemanager.data.backup.BackupRepositoryImpl
+import com.example.lifemanager.domain.backup.BackupRepository
+import com.example.lifemanager.domain.backup.BackupCodec
+import com.example.lifemanager.data.backup.BackupJsonCodec
+import com.example.lifemanager.data.backup.AndroidBackupFileStore
+import com.example.lifemanager.domain.backup.BackupFileStore
+import com.example.lifemanager.domain.backup.BackupFileUseCases
+import com.example.lifemanager.domain.maintenance.MaintenanceCoordinator
 import com.example.lifemanager.notification.ReminderScheduler
 import com.example.lifemanager.notification.ReminderSchedulerContract
 import com.example.lifemanager.notification.ScheduleReminderScheduler
@@ -49,11 +61,59 @@ abstract class AppModule {
     @Singleton
     abstract fun bindSubscriptionRepository(impl: SubscriptionRepositoryImpl): SubscriptionRepository
 
+    @Binds
+    @Singleton
+    abstract fun bindSettingsRepository(impl: SettingsRepositoryImpl): SettingsRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindDataGenerationRepository(impl: DataGenerationRepositoryImpl): DataGenerationRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindBackupRepository(impl: BackupRepositoryImpl): BackupRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindBackupFileStore(impl: AndroidBackupFileStore): BackupFileStore
+
+    @Binds
+    @Singleton
+    abstract fun bindBackupMutations(impl: com.example.lifemanager.data.backup.BackupMutationRepositoryImpl): com.example.lifemanager.domain.backup.BackupMutationRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindMaintenanceEffects(impl: com.example.lifemanager.notification.AndroidMaintenanceReminderEffects): com.example.lifemanager.domain.maintenance.MaintenanceReminderEffects
+
 }
 
 @Module
 @InstallIn(SingletonComponent::class)
 object ProviderModule {
+    @Provides
+    fun provideBackupWorkflow(
+        snapshots: BackupRepository,
+        mutations: com.example.lifemanager.domain.backup.BackupMutationRepository,
+        files: BackupFileUseCases,
+        generations: DataGenerationRepository,
+        coordinator: MaintenanceCoordinator,
+        reminders: com.example.lifemanager.domain.maintenance.MaintenanceReminderEffects,
+        @IoDispatcher dispatcher: CoroutineDispatcher,
+    ) = com.example.lifemanager.domain.backup.BackupMaintenanceWorkflow(snapshots, mutations, files, generations, coordinator, reminders, dispatcher)
+
+    @Provides
+    @Singleton
+    fun provideBackupCodec(): BackupCodec = BackupJsonCodec()
+
+    @Provides
+    fun provideBackupFileUseCases(
+        repository: BackupRepository,
+        codec: BackupCodec,
+        files: BackupFileStore,
+        maintenance: MaintenanceCoordinator,
+        @IoDispatcher dispatcher: CoroutineDispatcher,
+    ): BackupFileUseCases = BackupFileUseCases(repository, codec, files, maintenance, dispatcher)
+
     @Provides
     @Singleton
     fun provideSubscriptionReminderScheduler(@ApplicationContext context: Context): SubscriptionReminderSchedulerContract =

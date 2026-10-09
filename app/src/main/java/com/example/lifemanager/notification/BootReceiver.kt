@@ -4,52 +4,23 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import com.example.lifemanager.domain.repository.TodoRepository
-import com.example.lifemanager.domain.repository.ScheduleRepository
-import com.example.lifemanager.domain.repository.SubscriptionRepository
-import com.example.lifemanager.domain.usecase.SubscriptionOperationCoordinator
-import com.example.lifemanager.domain.usecase.TodoOperationCoordinator
-import com.example.lifemanager.domain.usecase.ScheduleOperationCoordinator
-import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import javax.inject.Inject
-
-@AndroidEntryPoint
 class BootReceiver : BroadcastReceiver() {
-    @Inject lateinit var repository: TodoRepository
-    @Inject lateinit var reminderScheduler: ReminderSchedulerContract
-    @Inject lateinit var scheduleRepository: ScheduleRepository
-    @Inject lateinit var scheduleReminderScheduler: ScheduleReminderSchedulerContract
-    @Inject lateinit var subscriptionRepository: SubscriptionRepository
-    @Inject lateinit var subscriptionReminderScheduler: SubscriptionReminderSchedulerContract
-
     override fun onReceive(context: Context, intent: Intent) {
-        val pendingResult = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                TodoOperationCoordinator.run {
-                    repository.getAllTodos().forEach { todo ->
-                        val dueAt = todo.dueAt
-                        if (todo.isCompleted || dueAt == null) reminderScheduler.cancel(todo.id)
-                        else reminderScheduler.schedule(todo.id, todo.title, dueAt)
-                    }
-                }
-                ScheduleOperationCoordinator.run { scheduleRepository.getSchedules().forEach(scheduleReminderScheduler::schedule) }
-                SubscriptionOperationCoordinator.run {
-                    subscriptionRepository.getSubscriptions().forEach { subscription ->
-                        subscriptionReminderScheduler.schedule(subscription, subscriptionRepository.getReminderDays(subscription.id))
-                    }
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                Log.w("BootReceiver", "Unable to restore reminders; daily reconciliation will retry", error)
-            } finally {
-                pendingResult.finish()
-            }
+        if (intent.action !in supportedActions) return
+        try {
+            // Durable work reads current Room data under the application's global permit.
+            // No broadcast-lifetime database reads, alarm loop, or waiting for maintenance.
+            ReminderReconciliationWorker.enqueueImmediate(context.applicationContext)
+        } catch (_: Exception) {
+            Log.w("BootReceiver", "Unable to enqueue reminder calibration; daily work remains available")
         }
+    }
+
+    companion object {
+        private val supportedActions = setOf(
+            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED,
+            Intent.ACTION_TIMEZONE_CHANGED, Intent.ACTION_TIME_CHANGED,
+            android.app.AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED,
+        )
     }
 }
