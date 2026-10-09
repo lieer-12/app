@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">生活管理</string>
+    <string name="app_name">日子芽</string>
     <string name="notification_channel_todos">待办提醒</string>
     <string name="notification_channel_description">待办事项截止时间提醒</string>
 </resources>

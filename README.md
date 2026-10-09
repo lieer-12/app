@@ -1,12 +1,22 @@
-# 生活管理 Android App
+# 日子芽 · 离线生活管理 Android App
 
-Kotlin + Jetpack Compose 的离线生活管理工具，包含待办、日程、习惯打卡与订阅费用管理。
+日子芽是 Kotlin + Jetpack Compose 的离线生活管理工具，包含待办、日程、习惯打卡与订阅费用管理。
 
 更新日期：2026-10-09。
 
-[下载 Android 预览 APK](https://github.com/lieer-12/app/releases/download/v0.1.0-ui-preview-20261008/app-debug.apk) · [版本说明](https://github.com/lieer-12/app/releases/tag/v0.1.0-ui-preview-20261008) · [最新开发代码](https://github.com/lieer-12/app/tree/feat/phase5-settings-backup)
+[下载已发布的 0.1.0 预览 APK（旧名称/图标）](https://github.com/lieer-12/app/releases/download/v0.1.0-ui-preview-20261008/app-debug.apk) · [版本说明](https://github.com/lieer-12/app/releases/tag/v0.1.0-ui-preview-20261008) · [已推送的开发代码](https://github.com/lieer-12/app/tree/feat/phase5-settings-backup)
 
 > 当前预览版本为 `v0.1.0-ui-preview-20261008`，对应源码提交 `ee8ac35`。Phase 5 功能与第一批 UI 位于 `feat/phase5-settings-backup`，尚未合并到 `main`；本 README 描述的是开发分支与预览 APK 的能力，不代表默认分支已有这些代码。APK 是测试预览版，不是正式发布版。
+
+## 名称与图标 · 开发版 0.1.1
+
+新名称「日子芽」寓意把生活中的小事整理好，让每一天慢慢长出新芽。图标是圆润的笑脸手账、两片新芽与珊瑚色书签，使用与 UI 一致的奶油白、薄荷绿和暖墨绿。
+
+图像生成服务返回 429 后，用户明确选择手工绘制 Android 原生矢量方案；本图标不是 AI 生成图片。提供自适应、圆形入口和 Android 13+ 单色主题图层。预览文件位于 `docs/assets/rizhiya-icon-rounded.png` 与 `docs/assets/rizhiya-icon-circle.png`；圆角预览是裁剪示例，实际外框由手机桌面的图标形状与主题决定，不能保证所有设备一致。
+
+本地开发包已更新为 0.1.1 / versionCode 2；applicationId、签名、数据库 schema 和业务逻辑不变。本批尚未提交、推送或发布新 APK；上面的 GitHub 0.1.0 下载仍为「生活管理」旧名称和旧图标，请勿将它当作新版。验证结果与覆盖安装边界记录在 `docs/branding-acceptance.md`。
+
+本批全量验证：669 项 JVM / 68 套件、57 项 API 35 设备测试 / 24 套件，均无 failure / error / skipped；Debug/Release 构建通过，lint 0 error / 55 warning。在项目专用模拟器覆盖安装后，一条旧版合成待办仍可见；不将此局部检查等同于全部真实数据或真机验收。
 
 当前实现范围：Phase 1（待办事项核心闭环）、Phase 2（日程安排）、Phase 3（习惯打卡）、Phase 4（订阅费用管理），以及 Phase 5 的设置和完整备份维护。四个业务模块共享同一个 Room 数据库，底部导航另保留设置页。Phase 5 功能回归通过，稳定 60 fps / 真机等未验收项仍明确保留；不代表原文档全部高级功能和发布要求均已完成。
 
@@ -39,7 +49,7 @@ Phase 5 功能回归通过：完整 JSON 导出/预览/恢复，保护备份与�
 
 ## 已有验证与待验收项
 
-以下为 2026-10-08 预览源码的验证证据；此次 README 更新没有重跑应用测试或更换 APK。
+以下为已发布 0.1.0 预览源码的历史验证证据；0.1.1 名称/图标开发包的本轮结果单独列于上文与 `docs/branding-acceptance.md`，不混用日期和范围。
 
 - 第一批 UI 的全量验证：665 项 JVM / 67 套件、54 项 API 35 设备测试 / 23 套件，均无 failure / error / skipped；Debug/Release 构建通过，lint 0 error / 57 warning。
 - 随后的推送前复验：665 项 JVM 使用 `--rerun` 重新执行通过；构建与 lint 通过。该轮设备复验因模拟器实例冲突未执行，不把此前 54 项结果当作重新运行。

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:rotation="-5" android:pivotX="54" android:pivotY="54">
+        <path
+            android:pathData="M54,45 C53,38 54,32 57,28"
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#FFFFFF" android:strokeWidth="2.4"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M54,37 C46,38 40,33 40,27 C47,26 54,29 54,37 Z M55,34 C54,28 60,24 67,26 C68,33 61,38 55,34 Z"
+            android:fillColor="#FFFFFF" />
+        <!-- Face and tick are true transparent cutouts, so wallpaper tint remains readable. -->
+        <path
+            android:fillType="evenOdd"
+            android:pathData="M41,43 H67 Q77,43 77,53 V70 Q77,80 67,80 H41 Q31,80 31,70 V53 Q31,43 41,43 Z M46.2,57 a1.8,1.8 0,1 0,3.6,0 a1.8,1.8 0,1 0,-3.6,0 Z M60.2,57 a1.8,1.8 0,1 0,3.6,0 a1.8,1.8 0,1 0,-3.6,0 Z M49,61 C50,67 58,67 60,61 L58,61 C57,65 52,65 51,61 Z M52,70 L56,73 L61,68 Q62,67 63,68 Q64,69 63,70 L57,75 Q56,76 55,75 L51,72 Q50,71 52,70 Z"
+            android:fillColor="#FFFFFF" />
+    </group>
+</vector>
