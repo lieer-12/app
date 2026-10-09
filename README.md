@@ -1,12 +1,22 @@
-# 生活管理 Android App
+# 日子芽 · 离线生活管理 Android App
 
-Kotlin + Jetpack Compose 的离线生活管理工具，包含待办、日程、习惯打卡与订阅费用管理。
+日子芽是 Kotlin + Jetpack Compose 的离线生活管理工具，包含待办、日程、习惯打卡与订阅费用管理。
 
 更新日期：2026-10-09。
 
-[下载 Android 预览 APK](https://github.com/lieer-12/app/releases/download/v0.1.0-ui-preview-20261008/app-debug.apk) · [版本说明](https://github.com/lieer-12/app/releases/tag/v0.1.0-ui-preview-20261008) · [最新开发代码](https://github.com/lieer-12/app/tree/feat/phase5-settings-backup)
+[下载日子芽 0.1.1 预览 APK](https://github.com/lieer-12/app/releases/download/v0.1.1-rizhiya-preview-20261009/app-debug.apk) · [版本说明](https://github.com/lieer-12/app/releases/tag/v0.1.1-rizhiya-preview-20261009) · [已推送的开发代码](https://github.com/lieer-12/app/tree/feat/phase5-settings-backup)
 
-> 当前预览版本为 `v0.1.0-ui-preview-20261008`，对应源码提交 `ee8ac35`。Phase 5 功能与第一批 UI 位于 `feat/phase5-settings-backup`，尚未合并到 `main`；本 README 描述的是开发分支与预览 APK 的能力，不代表默认分支已有这些代码。APK 是测试预览版，不是正式发布版。
+> 当前预览版本为 `v0.1.1-rizhiya-preview-20261009`，对应源码提交 `777e1e9`。Phase 5 功能、第一批 UI 与日子芽名称/图标位于 `feat/phase5-settings-backup`，尚未合并到 `main`；本 README 描述的是开发分支与预览 APK 的能力，不代表默认分支已有这些代码。APK 是测试预览版，不是正式发布版。
+
+## 名称与图标 · 0.1.1 预览版
+
+新名称「日子芽」寓意把生活中的小事整理好，让每一天慢慢长出新芽。图标是圆润的笑脸手账、两片新芽与珊瑚色书签，使用与 UI 一致的奶油白、薄荷绿和暖墨绿。
+
+图像生成服务返回 429 后，用户明确选择手工绘制 Android 原生矢量方案；本图标不是 AI 生成图片。提供自适应、圆形入口和 Android 13+ 单色主题图层。可查看[圆角预览](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/assets/rizhiya-icon-rounded.png)与[圆形预览](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/assets/rizhiya-icon-circle.png)；预览是裁剪示例，实际外框由手机桌面的图标形状与主题决定，不能保证所有设备一致。
+
+已提交并推送名称与图标改动，发布 0.1.1 / versionCode 2 预览 APK；applicationId、Debug 签名、数据库 schema 和业务逻辑不变。旧 0.1.0 Release 保留，不覆盖其安装包；顶部下载入口已指向新版。验证结果与覆盖安装边界见[名称与图标验收](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/branding-acceptance.md)。
+
+本批全量验证与 2026-10-09 推送前复验：669 项 JVM / 68 套件、57 项 API 35 设备测试 / 24 套件，均无 failure / error / skipped；两类测试均使用 `--rerun` 重新执行，Debug/Release 构建检查通过，lint 0 error / 55 warning。在项目专用模拟器覆盖安装后，一条旧版合成待办仍可见；不将此局部检查等同于全部真实数据或真机验收。
 
 当前实现范围：Phase 1（待办事项核心闭环）、Phase 2（日程安排）、Phase 3（习惯打卡）、Phase 4（订阅费用管理），以及 Phase 5 的设置和完整备份维护。四个业务模块共享同一个 Room 数据库，底部导航另保留设置页。Phase 5 功能回归通过，稳定 60 fps / 真机等未验收项仍明确保留；不代表原文档全部高级功能和发布要求均已完成。
 
@@ -39,7 +49,7 @@ Phase 5 功能回归通过：完整 JSON 导出/预览/恢复，保护备份与�
 
 ## 已有验证与待验收项
 
-以下为 2026-10-08 预览源码的验证证据；此次 README 更新没有重跑应用测试或更换 APK。
+以下为已发布 0.1.0 预览源码的历史验证证据；0.1.1 名称/图标预览版的本轮结果单独列于上文与[名称与图标验收](https://github.com/lieer-12/app/blob/feat/phase5-settings-backup/docs/branding-acceptance.md)，不混用日期和范围。
 
 - 第一批 UI 的全量验证：665 项 JVM / 67 套件、54 项 API 35 设备测试 / 23 套件，均无 failure / error / skipped；Debug/Release 构建通过，lint 0 error / 57 warning。
 - 随后的推送前复验：665 项 JVM 使用 `--rerun` 重新执行通过；构建与 lint 通过。该轮设备复验因模拟器实例冲突未执行，不把此前 54 项结果当作重新运行。
@@ -49,11 +59,11 @@ Phase 5 功能回归通过：完整 JSON 导出/预览/恢复，保护备份与�
 
 最低支持 Android 8.0（API 26），无需 Android Studio。
 
-1. 用手机浏览器点击 [下载 app-debug.apk（约 19.4 MB）](https://github.com/lieer-12/app/releases/download/v0.1.0-ui-preview-20261008/app-debug.apk)，也可在 [预览版页面](https://github.com/lieer-12/app/releases/tag/v0.1.0-ui-preview-20261008) 的 Assets 中下载。
+1. 用手机浏览器点击 [下载 app-debug.apk（约 18.7 MB）](https://github.com/lieer-12/app/releases/download/v0.1.1-rizhiya-preview-20261009/app-debug.apk)，也可在 [预览版页面](https://github.com/lieer-12/app/releases/tag/v0.1.1-rizhiya-preview-20261009) 的 Assets 中下载。
 2. 下载后打开 APK，按系统提示允许当前浏览器/文件管理器安装来自此来源的应用，然后安装。
 3. 安装完成后打开应用；可关闭刚才授予的安装权限。不要下载 Source code ZIP 或未签名 Release APK，它们不能作为此预览安装包使用。
 
-此包为 Debug 签名测试版，不是应用商店正式版本，也不代表 Phase 5 性能或全部 UI 已验收。文件大小 19,350,922 字节；SHA-256：`30786204c2fc04d1853232f9eda9e4ae8cb35c6c7ff93bacbfee3323a8206045`。
+此包为 Debug 签名测试版，不是应用商店正式版本，也不代表 Phase 5 性能或全部 UI 已验收。文件大小 18,685,604 字节；SHA-256：`65340e0b33e4976722836c9cdaa8ab2e2ba73f9d8b84d04ffe46a108e88631bf`。
 
 用手机浏览器打开 APK，按系统提示仅允许该浏览器/文件管理器安装来自此来源的应用，安装后可关闭此权限。无需关闭 Play Protect 等全局安全保护；不同厂商菜单名称可能不同，参见 [Android 安装说明](https://support.google.com/pixelphone/answer/7391672?hl=zh-Hans)。GitHub 访问不畅时，可在电脑下载 APK 后用 USB 文件传输到手机安装，无需开启 USB 调试。
 
