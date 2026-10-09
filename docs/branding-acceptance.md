@@ -23,6 +23,7 @@
 - 最终 Debug APK SHA-256：`65340e0b33e4976722836c9cdaa8ab2e2ba73f9d8b84d04ffe46a108e88631bf`。完成后重新检查签名、桌面与实际 APK 资源；示例渲染 PNG 不替代设备检查。
 - 独立限域源代码审查无 Critical / Important。审查核算前景最远笔画约 32.16dp，小于 33dp 安全区半径；绕中心旋转不改变距离。当前 normal/round/mono 接线正确。
 - 保留一项 Minor 覆盖边界：设备测试直接加载 round 资源，没有专门以错误/删除 Manifest `roundIcon` 指向制造失败；单色像素用例仅检查 normal 图标。编译后的 Manifest 与审查已核对实际指向，但不声称有完整负向回归。
+- 2026-10-09 推送前复验：JVM 任务使用 `--rerun`，669 项 / 68 套件均 0 failure / error / skipped，构建与 lint 检查 `BUILD SUCCESSFUL in 48s`（154 个任务，3 执行 / 151 up-to-date）；独立 API 35 设备任务另用 `--rerun`，57 项 / 24 套件均 0 failure / error / skipped，`BUILD SUCCESSFUL in 59s`（80 个任务，1 执行 / 79 up-to-date）。复验的构建和 lint 主要复用未变化产物；不声称重新编译全部源码。报告汇总最初误读 instrumentation XML 的根层级，提交被拦截；核对原始 `testsuites` 与 24 个子 `testsuite` 总数一致后才提交。
 
 本机复现（仅对项目专用、不含个人数据的测试设备）：
 
@@ -39,5 +40,6 @@ $env:ANDROID_SERIAL = 'emulator-5556'
 - 外框、桌面图标动画和单色染色由桌面设置及厂商支持决定；本次不修改系统形状设置，不宣称所有手机都能强制圆形。
 - 最低 API 26；本轮 JVM 图标用例覆盖 API 28/33，实际设备为 API 35 模拟器，不代表真机或 API 26 全适配。
 - 修改名称和图标不表示其余 UI 整页改版、Phase 5 性能或正式发布已完成。
-- 本批尚未提交、推送或上传新的 GitHub Release；已有公开 0.1.0 APK 仍使用旧名称与占位图标。本地构建 APK 可单独安装测试，安装前建议导出完整备份；签名冲突时不要直接卸载。
-- 矢量、预览、测试与文档可纳入后续提交；密钥、模拟器数据、测试日志和旧 APK 基线留在忽略的本机目录，不纳入 Git。
+- 源码提交 `777e1e9bb1c762ba721d90604400d8a2b2091627` 已推送到 `feat/phase5-settings-backup`；[0.1.1 预览 Release](https://github.com/lieer-12/app/releases/tag/v0.1.1-rizhiya-preview-20261009) 已公开发布，仍为 prerelease。上传资产 `app-debug.apk` 的 GitHub SHA-256 与上述本地产物一致，大小 18,685,604 字节；未上传不可直接安装的未签名 Release APK。
+- 已有公开 0.1.0 Release 与旧资产保留；安装新版前建议导出完整备份，然后覆盖安装。签名冲突时不要直接卸载或清除数据。
+- 矢量、预览、测试与文档已纳入提交；密钥、模拟器数据、测试日志和旧 APK 基线留在忽略的本机目录，未纳入 Git。默认分支只同步 README，Phase 5、UI 和品牌代码仍在开发分支；发布后的说明更新不改变 APK 对应的源码提交。
