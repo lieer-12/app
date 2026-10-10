@@ -19,6 +19,33 @@ class PlanStatisticsTest {
         assertEquals(PlanStatistics(0, 0, 0, 0, 0, 0.0), PlanStatisticsRules.calculate(emptyList(), now, zone))
     }
 
+    @Test fun `historical blank title remains countable without weakening write validation`() {
+        val historical = plan().copy(title = " \n", isCompleted = true, completedAt = now)
+        val result = runCatching { PlanStatisticsRules.calculate(listOf(historical), now, zone) }
+        assertTrue(result.isSuccess)
+        assertEquals(PlanStatistics(1, 1, 0, 1, 0, 1.0), result.getOrThrow())
+        assertEquals(PlanValidationError.TITLE_REQUIRED, PlanRules.validate(historical))
+    }
+
+    @Test fun `historical fixed offset zone counts date expiry but is rejected for new writes`() {
+        val historical = plan().copy(timeMode = PlanTimeMode.DEADLINE, dueDate = date, timeZone = "+08:00")
+        assertTrue(PlanStatisticsRules.isOverdue(historical, now))
+        assertEquals(PlanStatistics(1, 0, 1, 0, 1, 0.0), PlanStatisticsRules.calculate(listOf(historical), now, zone))
+        assertEquals(PlanValidationError.TIME_ZONE_INVALID, PlanRules.validate(historical))
+    }
+
+    @Test fun `invalid historical zone cannot bypass read validation in undated or instant modes`() {
+        val invalidPlans = listOf(
+            plan().copy(timeZone = "invalid/zone", isCompleted = true, completedAt = now),
+            plan().copy(timeZone = "invalid/zone", timeMode = PlanTimeMode.DEADLINE, dueAt = now.minusSeconds(1)),
+        )
+        invalidPlans.forEach { invalid ->
+            assertEquals(PlanValidationError.TIME_ZONE_INVALID, PlanRules.validateForRead(invalid))
+            assertFalse(PlanStatisticsRules.isOverdue(invalid, now))
+            assertFailsWith<IllegalArgumentException> { PlanStatisticsRules.calculate(listOf(invalid), now, zone) }
+        }
+    }
+
     @Test fun `whole database rate includes undated dated and completed series once`() {
         val values = listOf(plan(1), plan(2).copy(timeMode = PlanTimeMode.DEADLINE, dueAt = now), recurring(3).copy(isCompleted = true, completedAt = now))
         assertEquals(PlanStatistics(3, 1, 2, 1, 0, 1.0 / 3.0), PlanStatisticsRules.calculate(values, now, zone))

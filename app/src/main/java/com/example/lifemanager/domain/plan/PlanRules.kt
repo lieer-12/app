@@ -2,6 +2,7 @@ package com.example.lifemanager.domain.plan
 
 import java.time.Instant
 import java.time.LocalDate
+import java.time.DateTimeException
 import java.time.ZoneId
 
 enum class PlanValidationError {
@@ -13,11 +14,25 @@ enum class PlanValidationError {
 object PlanRules {
     private val timeZoneIds = ZoneId.getAvailableZoneIds()
 
-    /** Validates active time fields without clearing retained, inactive configuration. */
+    /** Strict new/edit validation; existing records use validateForRead. */
     fun validate(plan: Plan): PlanValidationError? {
+        if (plan.title.isBlank()) return PlanValidationError.TITLE_REQUIRED
+        if (plan.timeZone !in timeZoneIds) return PlanValidationError.TIME_ZONE_INVALID
+        return validateConfiguration(plan)
+    }
+
+    /** Legacy blank titles and valid fixed offsets remain readable, without normalization. */
+    fun validateForRead(plan: Plan): PlanValidationError? {
+        try {
+            ZoneId.of(plan.timeZone)
+        } catch (_: DateTimeException) {
+            return PlanValidationError.TIME_ZONE_INVALID
+        }
+        return validateConfiguration(plan)
+    }
+
+    private fun validateConfiguration(plan: Plan): PlanValidationError? {
         when {
-            plan.title.isBlank() -> return PlanValidationError.TITLE_REQUIRED
-            plan.timeZone !in timeZoneIds -> return PlanValidationError.TIME_ZONE_INVALID
             plan.repeatInterval < 1 -> return PlanValidationError.REPEAT_INTERVAL_INVALID
             plan.reminderMinutes != null && plan.reminderMinutes < 0 -> return PlanValidationError.REMINDER_MINUTES_INVALID
         }

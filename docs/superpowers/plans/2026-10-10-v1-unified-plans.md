@@ -3,7 +3,7 @@
 日期：2026-10-10。依据：已获用户全文确认的 [设计](../specs/2026-10-10-v1-unified-plans-design.md)。
 分支：`feat/v1-unified-plans`，用户选择在当前干净分支开发，不创建工作树。
 
-`writing-plans` 技能不可用，使用文件级任务、明确依赖与验收记录替代。Buddy 默认的新分支 / PR / 网页验收流程不直接套用原生 Android；不新增 Linear、网页依赖或流程文档。沿用现有 Gradle、TDD、独立审查及 Android 设备验收。总体路线不是一次可交付的单任务，每批在执行前细化并检查覆盖；本轮只执行批次 A。
+`writing-plans` 技能不可用，使用文件级任务、明确依赖与验收记录替代。Buddy 默认的新分支 / PR / 网页验收流程不直接套用原生 Android；不新增 Linear、网页依赖或流程文档。沿用现有 Gradle、TDD、独立审查及 Android 设备验收。总体路线不是一次可交付的单任务，每批在执行前细化并检查覆盖；当前执行 B1（A 已完成）。
 
 ## 目标与关键连接
 
@@ -49,6 +49,16 @@ E 是原子切换批：生产 Room v6、Hilt、统一仓库消费者、备份/�
 ## B · 无损转换、v6 数据实现与迁移装置（依赖 A）
 
 拆为字段转换、存储事务、迁移验证三子批；本批开始时补充逐文件子计划。
+
+### B1 · 第二批的字段与身份底座（2026-10-10）
+
+1. 新建 `data/plan/LegacyPlanRows.kt` 定义统一原始存储行、来源映射、转换输出、标签/例外行与旧提醒偏好；输入直接使用现有旧实体的原始字段，不经领域集合归一化。Migration Cursor 与严格已验证的旧备份都可构造相同旧输入。
+2. 先写 `test/.../data/plan/LegacyPlanConverterTest.kt`，再新增 `LegacyPlanConverter.kt`：传入新主键，不做旧 ID 加偏移；旧待办 parent 先 null，独立保存 parent 来源键；逐值保留标题/备注/Long/空值/重复星期字符串，初始化新增字段和旧四组合提醒资格。不是全库迁移或备份解析器。
+3. 先写 `LegacyPlanReferencesTest.kt`，再新增 `LegacyPlanReferences.kt`：以 `(source, legacyId)` 解析父/标签/例外；纯 lookup 契约供 SQL 实现，内存映射供受限文件转换。拒绝映射重复、目标 ID 复用、找不到父或关系，不假定父 ID 小于子。全库环 / 标签外键检查留 B2 的事务装置，不能用局部 mapper 声称全库安全。
+4. 按用户已确认的历史值兼容策略，先补领域读取/统计测试，再拆 `PlanRules` 的存量读取与新写入校验，统计使用读取校验。旧固定偏移时区、空白标题保留；新写入仍严格，不放宽坏时区或坏有效区间。
+5. 定向真实 RED/GREEN、完整 JVM `--rerun`、Debug / lint、独立审查及最终复验；同步 CHANGELOG / README / 验收、提交并按本次推送授权交付当前功能分支。不改生产 schema、Hilt、UI、APK 或用户数据。
+
+B1 对应设计 3/4/7 的共享转换规则与用户历史兼容补充。未包含 B2 存储事务和 B3 SQL 迁移链/故障回滚/设备升级，不能将 B1 验收当作 v6 已生效。
 
 - 新建 `data/plan/LegacyPlanConverter.kt`：原始字段 DTO / 纯映射共享给 SQL Migration 和旧备份；不经旧 ViewModel，不将原重复星期 String 重编码损失表示。ZoneId 与旧提醒偏好由调用方注入。
 - 新建 `data/plan` 下 PlanEntity、PlanTagCrossRef、PlanExceptionEntity、PlanLegacyRefEntity、PlanDao、PlanRepositoryImpl；新建 `domain/plan/PlanRepository.kt`。事务内 CRUD / parent detach / 防旧草稿复活，Flow 真实读错误向上传递。
@@ -118,4 +128,6 @@ git diff --check
 
 - 完整设计与当前分支开发方式已确认。
 - 独立计划审查发现 C/D 提前替换生产消费者与 E 激活关口冲突：已将现有绑定 / 默认格式 / 旧协议拒绝明确延后至 E；A 的统计边界测试清单补充。
-- A1–4 已完成领域底座局部验收：最终 703 项 JVM / 70 suites 全量重跑通过（新增 34 项），Debug 构建检查与 lint 通过（0 error / 55 warning）；计划和代码审查意见已独立复审关闭。详见验收记录。B–F 未实施，生产应用仍为 V0.1.1 / schema v5，已发布 APK 未改；没有迁移 / 页面 / 设备升级或整个 V1 已完成的含义。
+- A1–4 已完成领域底座局部验收：最终 703 项 JVM / 70 suites 全量重跑通过（新增 34 项），Debug 构建检查与 lint 通过（0 error / 55 warning）；计划和代码审查意见已独立复审关闭。
+- B1 已完成旧字段、双来源身份、关系映射及用户批准的存量读取兼容底座；最终 729 项 JVM / 72 suites 全量重跑通过（本批新增 26 项），Debug 构建检查通过，lint 0 error / 55 warning。独立审查的非法时区测试缺口补齐并复审关闭。详见验收记录。
+- 下一批 B2：统一 Room 实体 / DAO / 仓库与事务测试；B3：SQL 迁移链、回滚及设备验证。B2/B3–F 未实施，生产应用仍为 V0.1.1 / schema v5，已发布 APK 未改；没有迁移 / 页面 / 设备升级或整个 V1 已完成的含义。

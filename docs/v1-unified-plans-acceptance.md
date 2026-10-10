@@ -43,10 +43,37 @@ TDD：先编写测试与类型契约，以尚未实现行为的临时空规则�
 
 ## 后续及已知限制
 
-- B–F 未实施：来源双 ID 无损转换、Room v6 迁移/仓库、发生/提醒、v2/v1 备份兼容、统一页面/导航/设置、覆盖安装和版本交付。
+- A 与 B1 底座局部验收通过；B2/B3–F 未完成：Room v6 迁移/仓库、发生/提醒、v2/v1 备份兼容、统一页面/导航/设置、覆盖安装和版本交付。
 - 本批构件尚未接入生产业务，不能在已发布软件中使用新的转换 / 完成规则；不以单元测试代替设备迁移验收。
 - 独立统计页、今天真实日程、重复展开 / 例外 / 冲突、UI 移除日期确认均在后续实现；本批没有占位入口。
-- V1 目标为 1.0.0 / code 3 / schema v6，当前仍为 0.1.1 / code 2 / schema v5。main、远端分支及已发布 APK 本轮未更新。
+- V1 目标为 1.0.0 / code 3 / schema v6，当前仍为 0.1.1 / code 2 / schema v5。main 及已发布 APK 本轮未更新；功能分支交付见下文，不等于发布 APK。
 - 真机、稳定 60fps、Gradle Wrapper、正式签名等历史发布限制仍保留；不声称改版自动解决。
 
 依据：[设计](superpowers/specs/2026-10-10-v1-unified-plans-design.md)、[计划](superpowers/plans/2026-10-10-v1-unified-plans.md)。
+
+## 2026-10-10 · 第一批推送与更新文档规则
+
+- 用户明确要求推送，并且每次版本更新附带更新内容文档。新增 CHANGELOG 与仓库 AGENTS 交付约定，README 提供入口；未发布子批不虚标已发布版本。
+- 本轮推送前复验：相同三任务命令，BUILD SUCCESSFUL（46 秒，65 tasks：2 executed / 63 up-to-date）。703 项 JVM / 70 suites 实际重跑，0 failure / error / skipped；Debug / lint 为缓存检查，未执行设备验收。
+- 已推送 `feat/v1-unified-plans` 到 `3aefb0158ff46952b83927e657463000a2ea3d55`；`git ls-remote` 与本地 HEAD 一致。包含第一批 `21a4dc2` 及规则/更新日志提交 `3aefb01`，未合并 main、创建 PR 或发布 APK。
+
+## B1 · 第二批：无损转换及来源关系
+
+范围：原始存储行契约、旧实体字段转换、新旧来源身份与父/标签/例外映射、旧提醒资格转换、用户批准的历史标题/时区读取兼容。输入使用旧实体原始字段，不经领域时间或重复集合归一化；SQL 与经过严格验证的旧备份以后可共用同一转换器。
+
+TDD RED：新增测试和最小 API 声明，运行 `data.plan.*` 与 `domain.plan.*`；编译成功，59 项 / 4 suites，24 项 assertion failure（包含 2 项已有领域统计的兼容问题），不是编译错误。随后用实际转换/映射替换临时未实现方法。定向 GREEN：59 项 / 4 suites，0 failure / error / skipped，BUILD SUCCESSFUL（1 分 20 秒，39 tasks：11 executed / 28 up-to-date）。
+
+首次全量验证：相同三任务命令，BUILD SUCCESSFUL（2 分 7 秒，65 tasks：13 executed / 52 up-to-date）；实际 XML 为 728 项 JVM / 72 suites，0 failure / error / skipped。JVM 强制重跑，Debug 重新打包，lint 三类源分析执行，XML 为 0 error / 55 warning。
+
+独立代码审查无 Critical / Important。唯一 Minor 是缺少对读取路径非法时区的直接回归；已补 1 项覆盖已完成 NONE 与 Instant DEADLINE，直接检查读取校验拒绝、逾期为 false、统计抛异常。原实现正确，此为覆盖补强，不虚称一次功能修复 RED。定向独立复审确认关闭，无新增问题；补强后全量复验结果另列。
+
+最终复验：相同三任务命令，BUILD SUCCESSFUL（4 分 4 秒，65 tasks：8 executed / 57 up-to-date）。
+
+- 实际 XML：729 项 JVM / 72 suites，0 failure / error / skipped；JVM 强制重跑。本批新增 26 项：Converter 12、References 11、Statistics 新增 3；统一计划定向共 60 项（Rules 19、Statistics 18）。
+- Debug 为首次重打包后的 UP-TO-DATE 检查；lint 本次重新分析 UnitTest，production / AndroidTest 分析与最终 report 复用未变内容。XML 0 error / 55 warning，新增 data/plan 与 domain/plan 无 issue。
+- `git diff --check` 通过；新文件无临时未实现方法或破坏性迁移，只有测试装置使用合成数据，不注入业务库。未运行设备迁移/新版 UI 测试，不混用旧设备结果。
+- B1 转换底座局部验收通过，不代表 B2/B3、整个 V1 或正式版本已完成。README、CHANGELOG、设计兼容补充和实施进度同步，交付当前功能分支，不合并 main 或发布 APK。
+
+边界：转换器是字段转换，不是完整旧备份/数据库验证器；新 ID 由调用方分配，不能把 helper 当成已执行顺序 SQL 自增。父先 null，保留旧来源供二次修复；全库环/外键、设置/世代损坏、逐表快照、事务回滚和设备迁移在 B2/B3 验证。纯 lookup 可由 SQL 实现；内存 registry 只用于受限文件，不在迁移中要求整库入内存。
+
+生产 v5 / Hilt / UI / 备份格式 / 提醒调用均未切换，未操作用户库。用户选择的兼容修正只在新的统一领域底座，不改变已发布 V0 运行路径。

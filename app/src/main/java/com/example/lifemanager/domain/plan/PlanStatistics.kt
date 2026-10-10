@@ -20,7 +20,7 @@ object PlanStatisticsRules {
         var todayCompleted = 0
         var overdue = 0
         for (plan in allPlans) {
-            val error = PlanRules.validate(plan)
+            val error = PlanRules.validateForRead(plan)
             require(error == null) { "Invalid plan ${plan.id} in statistics: $error" }
             if (plan.isCompleted) {
                 completed++
@@ -40,7 +40,7 @@ object PlanStatisticsRules {
     }
 
     fun isOverdue(plan: Plan, now: Instant): Boolean {
-        if (PlanRules.validate(plan) != null || plan.isCompleted || plan.isRepeating) return false
+        if (PlanRules.validateForRead(plan) != null || plan.isCompleted || plan.isRepeating) return false
         return when (plan.timeMode) {
             PlanTimeMode.NONE -> false
             PlanTimeMode.DEADLINE -> plan.dueAt?.let(now::isAfter)
