@@ -2,11 +2,19 @@
 
 日子芽是 Kotlin + Jetpack Compose 的离线生活管理工具，包含待办、日程、习惯打卡与订阅费用管理。
 
-更新日期：2026-10-09。
+更新日期：2026-10-10。
 
 [下载日子芽 0.1.1 预览 APK](https://github.com/lieer-12/app/releases/download/v0.1.1-rizhiya-preview-20261009/app-debug.apk) · [版本说明](https://github.com/lieer-12/app/releases/tag/v0.1.1-rizhiya-preview-20261009) · [主分支代码](https://github.com/lieer-12/app/tree/main)
 
 > 当前预览版本为 `v0.1.1-rizhiya-preview-20261009`，对应源码提交 `777e1e9`。2026-10-09 将 `feat/phase5-settings-backup` 的 Phase 5 功能、第一批 UI 与日子芽名称/图标整合至 `main`，默认分支包含这些代码；本次整合仅更新合并状态文档，不改动应用实现或已发布 APK。APK 仍是测试预览版，不是正式发布版。合并验证范围与未验收项见[主分支整合记录](https://github.com/lieer-12/app/blob/main/docs/main-merge-acceptance.md)。
+
+## V1 统一计划改版 · 开发中
+
+已确认以统一计划模型和表替代独立待办 / 日程：无日期归待办，有日期归日程；添加截止日期更新同一条记录，两类均可完成 / 撤销，重复日程完成表示整个系列结束。目标导航为「计划 / 打卡 / 订阅 / 设置」，目标版本 1.0.0 / versionCode 3。
+
+当前在 `feat/v1-unified-plans` 分批开发。第一批为领域模型与规则，尚未接入页面、Room、备份或提醒；实际应用仍是 0.1.1 / code 2 / schema v5，顶部下载包和 main 不包含 V1，不能从设计批准推断数据迁移或新版发布已完成。统一接线验收前不切换数据库版本、不开放空入口，不使用 destructive migration。详见仓库内 [完整设计](docs/superpowers/specs/2026-10-10-v1-unified-plans-design.md)、[实施计划](docs/superpowers/plans/2026-10-10-v1-unified-plans.md)及[分批验收](docs/v1-unified-plans-acceptance.md)。
+
+第一批领域底座局部验收通过：按 TDD 实现分类、完成 / 撤销、日期转换及全库统计规则，新增 34 项测试；本轮 703 项 JVM / 70 suites 使用 `--rerun` 全量重跑通过，Debug 构建检查成功，lint 0 error / 55 warning。独立审查问题已关闭；未运行新迁移 / 新 UI 的设备验收，不把领域测试当作整个 V1 已完成。
 
 ## 名称与图标 · 0.1.1 预览版
 
