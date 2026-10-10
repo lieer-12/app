@@ -4,6 +4,8 @@
 
 更新日期：2026-10-10。
 
+每次版本更新附带[更新内容文档](CHANGELOG.md)；开发中分批结果与已发布版本分开记录，此约定已写入仓库 `AGENTS.md`。
+
 [下载日子芽 0.1.1 预览 APK](https://github.com/lieer-12/app/releases/download/v0.1.1-rizhiya-preview-20261009/app-debug.apk) · [版本说明](https://github.com/lieer-12/app/releases/tag/v0.1.1-rizhiya-preview-20261009) · [主分支代码](https://github.com/lieer-12/app/tree/main)
 
 > 当前预览版本为 `v0.1.1-rizhiya-preview-20261009`，对应源码提交 `777e1e9`。2026-10-09 将 `feat/phase5-settings-backup` 的 Phase 5 功能、第一批 UI 与日子芽名称/图标整合至 `main`，默认分支包含这些代码；本次整合仅更新合并状态文档，不改动应用实现或已发布 APK。APK 仍是测试预览版，不是正式发布版。合并验证范围与未验收项见[主分支整合记录](https://github.com/lieer-12/app/blob/main/docs/main-merge-acceptance.md)。
